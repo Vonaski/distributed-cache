@@ -1,0 +1,127 @@
+#####################################################
+# Distributed Cache Project
+# Multi-module Maven (root + modules)
+#####################################################
+
+############################
+# Maven build
+############################
+# Common build output
+target/
+*/target/
+
+# Maven backup and temp files
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+release.properties
+dependency-reduced-pom.xml
+
+# Maven wrapper (if used)
+.mvn/
+mvnw
+mvnw.cmd
+
+############################
+# IDEs / Editors
+############################
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+!.run/
+
+# VS Code
+.vscode/
+
+# Eclipse
+.project
+.classpath
+.settings/
+bin/
+
+# NetBeans
+nbproject/private/
+build/
+nbbuild/
+dist/
+nbdist/
+.nb-gradle/
+
+############################
+# Logs, temp & OS-specific
+############################
+*.log
+*.tmp
+*.bak
+*.swp
+*.old
+hs_err_pid*
+replay_pid*
+
+# macOS / Windows
+.DS_Store
+Thumbs.db
+desktop.ini
+
+############################
+# Environment / Secrets
+############################
+.env
+*.local
+*.secret
+*.key
+*.pem
+
+############################
+# Cache / Reports / Coverage
+############################
+.cache/
+coverage/
+jacoco.exec
+reports/
+*.hprof
+
+############################
+# Docker / Infra
+############################
+*.pid
+*.pid.lock
+docker-compose.override.yml
+
+############################
+# Archives / Test Data
+############################
+*.zip
+*.tar
+*.gz
+*.7z
+*.db
+/test-data/
+*.dump
+*.sql
+
+############################
+# Generated / Codegen / Lombok
+############################
+generated-sources/
+generated/
+lombok.config
+
+############################
+# Editor backups
+############################
+*~
+*.orig
+*.rej
+
+############################
+# Local overrides (optional)
+############################
+# Ignore module-local configs or overrides if any
+cache-node/local/
+proxy/local/
+common/local/
