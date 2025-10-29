@@ -18,6 +18,10 @@ import java.util.concurrent.TimeUnit;
 /**
  * ReplicationReceiver — Netty server which accepts replication tasks from peers
  * and applies them to local CacheStore.
+ * <p>
+ * Improvements:
+ * - Self-origin check to prevent replication loops
+ * - NodeId parameter for origin validation
  */
 public final class ReplicationReceiver {
 
@@ -27,20 +31,26 @@ public final class ReplicationReceiver {
     private final int port;
     private final CacheStore store;
     private final int maxFrameLength;
+    private final String nodeId;
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
     private Channel serverChannel;
     private volatile boolean running = false;
 
     public ReplicationReceiver(String host, int port, CacheStore store) {
-        this(host, port, store, DEFAULT_MAX_FRAME_LENGTH);
+        this(host, port, store, DEFAULT_MAX_FRAME_LENGTH, null);
     }
 
     public ReplicationReceiver(String host, int port, CacheStore store, int maxFrameLength) {
+        this(host, port, store, maxFrameLength, null);
+    }
+
+    public ReplicationReceiver(String host, int port, CacheStore store, int maxFrameLength, String nodeId) {
         this.host = Objects.requireNonNull(host, "host");
         this.port = port;
         this.store = Objects.requireNonNull(store, "store");
         this.maxFrameLength = maxFrameLength > 0 ? maxFrameLength : DEFAULT_MAX_FRAME_LENGTH;
+        this.nodeId = nodeId;
     }
 
     public void start() {
@@ -66,7 +76,8 @@ public final class ReplicationReceiver {
                             p.addLast(new SimpleChannelInboundHandler<ReplicationTask>() {
                                 @Override
                                 protected void channelRead0(ChannelHandlerContext ctx, ReplicationTask task) {
-                                    log.info("Receiver on {}:{} got replication task {} -> {}", host, port, task.key(), task.operation());
+                                    log.debug("Receiver on {}:{} got replication task {} -> {}",
+                                            host, port, task.key(), task.operation());
                                     try {
                                         applyTask(task);
                                     } catch (Exception e) {
@@ -75,7 +86,8 @@ public final class ReplicationReceiver {
                                 }
                                 @Override
                                 public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-                                    log.error("Replication pipeline exception from {}: {}", ctx.channel().remoteAddress(), cause.getMessage(), cause);
+                                    log.error("Replication pipeline exception from {}: {}",
+                                            ctx.channel().remoteAddress(), cause.getMessage(), cause);
                                     ctx.close();
                                 }
                             });
@@ -85,12 +97,12 @@ public final class ReplicationReceiver {
             InetSocketAddress address = new InetSocketAddress(host, port);
             ChannelFuture future = bootstrap.bind(address).syncUninterruptibly();
             if (future.isSuccess()) {
-                    serverChannel = future.channel();
-                    running = true;
-                    log.info("ReplicationReceiver started on {}:{}", host, port);
+                serverChannel = future.channel();
+                running = true;
+                log.info("ReplicationReceiver started on {}:{}", host, port);
             } else {
-                    log.error("Failed to bind ReplicationReceiver on {}:{}", host, port, future.cause());
-                    shutdownEventLoopGroupsQuietly();
+                log.error("Failed to bind ReplicationReceiver on {}:{}", host, port, future.cause());
+                shutdownEventLoopGroupsQuietly();
             }
         } catch (Throwable t) {
             log.error("Unexpected error while starting ReplicationReceiver", t);
@@ -148,10 +160,21 @@ public final class ReplicationReceiver {
     public void applyTask(ReplicationTask task) {
         if (task == null) return;
 
-        switch (task.operation()) {
-            case SET -> store.put(task.key(), task.value());
-            case DELETE -> store.delete(task.key());
-            default -> log.warn("Unknown replication operation: {}", task.operation());
+        if (nodeId != null && nodeId.equals(task.origin())) {
+            log.debug("Ignoring self-origin replication task for key={} from origin={}",
+                    task.key(), task.origin());
+            return;
+        }
+
+        try {
+            switch (task.operation()) {
+                case SET -> store.put(task.key(), task.value(), task.timestamp());
+                case DELETE -> store.delete(task.key());
+                default -> log.warn("Unknown replication operation: {}", task.operation());
+            }
+        } catch (Exception e) {
+            log.error("Failed to apply replication task to store: key={}, operation={}, error={}",
+                    task.key(), task.operation(), e.getMessage(), e);
         }
     }
 }

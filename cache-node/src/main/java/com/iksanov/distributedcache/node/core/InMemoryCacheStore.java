@@ -3,7 +3,6 @@ package com.iksanov.distributedcache.node.core;
 import com.iksanov.distributedcache.common.exception.CacheException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.Iterator;
@@ -14,15 +13,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Thread-safe in-memory cache store with TTL + LRU.
- * - Uses ConcurrentHashMap for storage.
- * - Uses ConcurrentLinkedDeque of CacheEntry instances for access order.
- * - Eviction is handled by a single-threaded evictor executor (no CompletableFuture).
- * - Cleanup of expired entries is scheduled.
- * <p>
- * Important invariants:
- * - store (ConcurrentHashMap) is the source of truth for which CacheEntry is current.
- * - accessOrder holds CacheEntry instances; evict/cleanup remove by instance using store.remove(key, entry).
+ * Thread-safe in-memory cache store with TTL + LRU eviction.
+ *
+ * <p>Key features:
+ * <ul>
+ *   <li>Last-Write-Wins conflict resolution for distributed consistency</li>
+ *   <li>TTL-based automatic expiration</li>
+ *   <li>LRU eviction when size limit is exceeded</li>
+ *   <li>Thread-safe concurrent operations</li>
+ * </ul>
  */
 public class InMemoryCacheStore implements CacheStore {
 
@@ -62,7 +61,6 @@ public class InMemoryCacheStore implements CacheStore {
         return Executors.newSingleThreadScheduledExecutor(factory);
     }
 
-
     private static ExecutorService buildSingleThreadExecutor(String name) {
         ThreadFactory factory = runnable -> {
             Thread t = new Thread(runnable, name);
@@ -92,42 +90,46 @@ public class InMemoryCacheStore implements CacheStore {
 
     @Override
     public void put(String key, String value) {
+        put(key, value, System.currentTimeMillis());
+    }
+
+    public void put(String key, String value, long timestamp) {
         Objects.requireNonNull(key, "key");
-        long expireAt = defaultTtlMillis > 0
-                ? System.currentTimeMillis() + defaultTtlMillis
-                : -1;
-
-        CacheEntry newEntry = new CacheEntry(key, value, expireAt);
-
+        long expireAt = defaultTtlMillis > 0 ? System.currentTimeMillis() + defaultTtlMillis : -1;
+        CacheEntry newEntry = new CacheEntry(key, value, expireAt, timestamp);
         store.compute(key, (_, old) -> {
+            if (old != null && old.timestamp() > timestamp) {
+                log.debug("Ignoring outdated write for key={} (existing={}, incoming={})", key, old.timestamp(), timestamp);
+                return old;
+            }
             if (old == null) {
                 currentSize.incrementAndGet();
-                log.debug("Put new entry key={} (expireAt={})", key, expireAt > 0 ? expireAt : "∞");
+                log.debug("Put new entry key={} with timestamp={}", key, timestamp);
+            } else {
+                log.debug("Updated entry key={} (old_ts={}, new_ts={})", key, old.timestamp(), timestamp);
             }
             accessOrder.addLast(newEntry);
             return newEntry;
         });
-
-        if (currentSize.get() > maxSize && evictionInProgress.compareAndSet(false, true)) {
-            evictor.submit(() -> {
-                try {
-                    evictUntilSizeWithinLimit();
-                } finally {
-                    evictionInProgress.set(false);
-                }
-            });
-        }
-        if (log.isInfoEnabled()) log.info("Cache size after put: {}", currentSize.get());
+        triggerEvictionIfNeeded();
     }
 
     @Override
     public void delete(String key) {
+        delete(key, System.currentTimeMillis());
+    }
+
+    public void delete(String key, long timestamp) {
         Objects.requireNonNull(key, "key");
-        CacheEntry removed = store.remove(key);
-        if (removed != null) {
+        store.computeIfPresent(key, (_, existing) -> {
+            if (existing.timestamp() > timestamp) {
+                log.debug("Ignoring outdated delete for key={} (existing={}, incoming={})", key, existing.timestamp(), timestamp);
+                return existing;
+            }
             currentSize.decrementAndGet();
-            log.debug("Deleted key={}", key);
-        }
+            log.debug("Deleted key={} with timestamp={}", key, timestamp);
+            return null;
+        });
     }
 
     @Override
@@ -161,6 +163,18 @@ public class InMemoryCacheStore implements CacheStore {
 
     private void touchEntry(CacheEntry entry) {
         accessOrder.addLast(entry);
+    }
+
+    private void triggerEvictionIfNeeded() {
+        if (currentSize.get() > maxSize && evictionInProgress.compareAndSet(false, true)) {
+            evictor.submit(() -> {
+                try {
+                    evictUntilSizeWithinLimit();
+                } finally {
+                    evictionInProgress.set(false);
+                }
+            });
+        }
     }
 
     private void evictUntilSizeWithinLimit() {
@@ -199,7 +213,9 @@ public class InMemoryCacheStore implements CacheStore {
                     removedCount++;
                 }
             }
-            if (removedCount > 0) log.info("Cleaned up {} expired entries (current size={})", removedCount, store.size());
+            if (removedCount > 0) {
+                log.info("Cleaned up {} expired entries (current size={})", removedCount, store.size());
+            }
         } catch (Throwable t) {
             log.error("Error during cleanupExpiredEntries", t);
         }
@@ -216,7 +232,10 @@ public class InMemoryCacheStore implements CacheStore {
                 skipped++;
             }
         }
-        if (skipped > 0) log.debug("Compacted LRU queue: removed {} stale entries ({} -> {})", skipped, before, accessOrder.size());
+        if (skipped > 0) {
+            log.debug("Compacted LRU queue: removed {} stale entries ({} -> {})",
+                    skipped, before, accessOrder.size());
+        }
     }
 
     private void removeInternal(String key, CacheEntry entry) {

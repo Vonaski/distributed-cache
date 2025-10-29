@@ -18,19 +18,25 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 
 /**
- * ReplicationSender — минимально-инвазивный, устойчивый sender:
- *  - reuses Channel per replica
- *  - safe shutdown that ALWAYS clears channels map
- *  - defensive close handling (works with mocks)
+ * ReplicationSender manages persistent connections to replica nodes.
+ *
+ * <p>Key features:
+ * <ul>
+ *   <li>Connection pooling - reuses channels per replica</li>
+ *   <li>Automatic reconnection on failure</li>
+ *   <li>Thread-safe concurrent operations</li>
+ *   <li>Graceful shutdown with resource cleanup</li>
+ * </ul>
  */
 public class ReplicationSender {
 
     private static final Logger log = LoggerFactory.getLogger(ReplicationSender.class);
-
+    private static final int MAX_FRAME_LENGTH = 1024 * 1024;
     private final ReplicaManager replicaManager;
     private final EventLoopGroup eventLoopGroup;
     private final Bootstrap bootstrap;
     private final ConcurrentMap<String, Channel> channels = new ConcurrentHashMap<>();
+    private volatile boolean shuttingDown = false;
 
     public ReplicationSender(ReplicaManager replicaManager) {
         this(replicaManager, null);
@@ -44,31 +50,44 @@ public class ReplicationSender {
                 .group(this.eventLoopGroup)
                 .channel(NioSocketChannel.class)
                 .option(ChannelOption.TCP_NODELAY, true)
-                .option(ChannelOption.SO_KEEPALIVE, true);
+                .option(ChannelOption.SO_KEEPALIVE, true)
+                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 5000);
     }
 
     public void replicate(NodeInfo master, ReplicationTask task) {
-        log.info("Replicating task {} from {} → replicas: {}", task.key(), master.nodeId(), replicaManager.getReplicas(master));
-        Set<NodeInfo> replicas = replicaManager.getReplicas(master);
-        if (replicas == null || replicas.isEmpty()) {
-            log.warn("No replicas found for master {}", master.nodeId());
+        if (shuttingDown) {
+            log.debug("Skipping replication during shutdown");
             return;
         }
-
+        Set<NodeInfo> replicas = replicaManager.getReplicas(master);
+        if (replicas == null || replicas.isEmpty()) {
+            log.debug("No replicas configured for master {}", master.nodeId());
+            return;
+        }
+        log.debug("Replicating {} operation for key={} to {} replicas", task.operation(), task.key(), replicas.size());
         for (NodeInfo replica : replicas) {
-            if (replica == null) continue;
-            if (master != null && replica.nodeId().equals(master.nodeId())) continue;
-            send(replica, task);
+            if (replica == null || replica.nodeId().equals(master.nodeId())) continue;
+            sendAsync(replica, task);
         }
     }
 
-    private void send(NodeInfo replica, ReplicationTask task) {
-        Channel ch = channels.get(replica.nodeId());
-        if (ch != null && ch.isActive()) {
-            safeWrite(replica, ch, task);
-            return;
-        }
+    private void sendAsync(NodeInfo replica, ReplicationTask task) {
+        Channel ch = getOrCreateChannel(replica);
+        if (ch != null && ch.isActive()) writeTask(replica, ch, task);
+    }
 
+    private Channel getOrCreateChannel(NodeInfo replica) {
+        Channel existing = channels.get(replica.nodeId());
+        if (existing != null && existing.isActive()) return existing;
+        if (existing != null) {
+            channels.remove(replica.nodeId(), existing);
+            closeQuietly(existing);
+        }
+        return connectToReplica(replica);
+    }
+
+    private Channel connectToReplica(NodeInfo replica) {
+        if (shuttingDown) return null;
         try {
             Bootstrap child = bootstrap.clone();
             child.handler(new ChannelInitializer<>() {
@@ -76,91 +95,107 @@ public class ReplicationSender {
                 protected void initChannel(Channel ch) {
                     ChannelPipeline p = ch.pipeline();
                     p.addLast(new LengthFieldPrepender(4));
-                    p.addLast(new LengthFieldBasedFrameDecoder(1024 * 1024, 0, 4, 0, 4));
+                    p.addLast(new LengthFieldBasedFrameDecoder(MAX_FRAME_LENGTH, 0, 4, 0, 4));
                     p.addLast(new ReplicationMessageCodec());
+                    p.addLast(new ChannelInboundHandlerAdapter() {
+                        @Override
+                        public void channelInactive(ChannelHandlerContext ctx) {
+                            log.debug("Connection to replica {} closed", replica.nodeId());
+                            channels.remove(replica.nodeId(), ctx.channel());
+                        }
+
+                        @Override
+                        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+                            log.debug("Channel error for replica {}: {}", replica.nodeId(), cause.getMessage());
+                            channels.remove(replica.nodeId(), ctx.channel());
+                            ctx.close();
+                        }
+                    });
                 }
             });
 
-            ChannelFuture f = child.connect(replica.host(), replica.replicationPort()).syncUninterruptibly();
-            if (f.isSuccess()) {
-                log.info("Connected to replica {} at {}:{}", replica.nodeId(), replica.host(), replica.replicationPort());
-                Channel newCh = f.channel();
-                channels.put(replica.nodeId(), newCh);
-                safeWrite(replica, newCh, task);
-            } else {
-                log.warn("Connect to replica {} failed: {}", replica.nodeId(),
-                        f.cause() != null ? f.cause().toString() : "unknown");
+            ChannelFuture connectFuture = child.connect(replica.host(), replica.replicationPort());
+
+            connectFuture.addListener((ChannelFutureListener) future -> {
+                if (future.isSuccess()) {
+                    Channel newChannel = future.channel();
+                    channels.put(replica.nodeId(), newChannel);
+                    log.debug("Connected to replica {} at {}:{}",
+                            replica.nodeId(), replica.host(), replica.replicationPort());
+                } else {
+                    log.warn("Failed to connect to replica {}: {}",
+                            replica.nodeId(), future.cause().getMessage());
+                }
+            });
+
+            if (connectFuture.await(1000, TimeUnit.MILLISECONDS)) {
+                if (connectFuture.isSuccess()) {
+                    return connectFuture.channel();
+                }
             }
         } catch (Exception e) {
-            log.warn("Connect to replica {} failed: {}", replica.nodeId(), e.toString());
+            log.warn("Exception connecting to replica {}: {}", replica.nodeId(), e.getMessage());
         }
+        return null;
     }
 
-    private void safeWrite(NodeInfo replica, Channel ch, ReplicationTask task) {
+    private void writeTask(NodeInfo replica, Channel ch, ReplicationTask task) {
+        if (!ch.isActive()) {
+            channels.remove(replica.nodeId(), ch);
+            return;
+        }
+
         try {
-            ChannelFuture cf = ch.writeAndFlush(task);
-            if (cf == null) {
-                log.warn("writeAndFlush returned null future for replica {}, skipping", replica.nodeId());
-                channels.remove(replica.nodeId());
+            ChannelFuture writeFuture = ch.writeAndFlush(task);
+            if (writeFuture == null) {
+                log.warn("writeAndFlush returned null for replica {}", replica.nodeId());
+                removeChannel(replica.nodeId(), ch);
                 return;
             }
 
-            cf.addListener((ChannelFutureListener) future -> {
-                if (!future.isSuccess()) {
-                    log.warn("Write to replica {} failed: {}", replica.nodeId(),
-                            future.cause() != null ? future.cause().toString() : "unknown");
-                    channels.remove(replica.nodeId());
-                    try {
-                        Channel c = future.channel();
-                        if (c != null && c.isOpen()) c.close();
-                    } catch (Exception ignored) {}
+            writeFuture.addListener((ChannelFutureListener) future -> {
+                if (future.isSuccess()) {
+                    log.trace("Successfully replicated to {}", replica.nodeId());
                 } else {
-                    log.debug("Write to replica {} succeeded", replica.nodeId());
+                    log.warn("Write failed for replica {}: {}",
+                            replica.nodeId(), future.cause().getMessage());
+                    removeChannel(replica.nodeId(), future.channel());
                 }
             });
         } catch (Exception e) {
-            log.warn("Exception while sending to replica {}: {}", replica.nodeId(), e.toString());
-            channels.remove(replica.nodeId());
+            log.warn("Exception writing to replica {}: {}", replica.nodeId(), e.getMessage());
+            removeChannel(replica.nodeId(), ch);
+        }
+    }
+
+    private void removeChannel(String replicaId, Channel ch) {
+        if (channels.remove(replicaId, ch)) {
+            closeQuietly(ch);
+        }
+    }
+
+    private void closeQuietly(Channel ch) {
+        if (ch != null) {
+            try {
+                if (ch.isOpen()) ch.close();
+            } catch (Exception ignored) {
+                // Best effort
+            }
         }
     }
 
     public void shutdown() {
         log.info("Shutting down ReplicationSender...");
+        shuttingDown = true;
         try {
-            for (Channel c : channels.values()) {
-                if (c == null) continue;
-                try {
-                    boolean open;
-                    try {
-                        open = c.isOpen();
-                    } catch (Throwable ignored) {
-                        open = false;
-                    }
-                    if (open) {
-                        ChannelFuture f = null;
-                        try {
-                            f = c.close();
-                        } catch (Throwable ex) {
-                            log.debug("channel.close() threw: {}", ex.toString());
-                        }
-                        if (f != null) {
-                            try {
-                                f.syncUninterruptibly();
-                            } catch (Throwable ignored) {}
-                        }
-                    }
-                } catch (Throwable ignore) {
-                }
+            for (Channel ch : channels.values()) {
+                closeQuietly(ch);
             }
-
-            try {
-                eventLoopGroup.shutdownGracefully().awaitUninterruptibly(2, TimeUnit.SECONDS);
-            } catch (Throwable ignored) {
-            }
-
-            log.info("ReplicationSender shut down successfully.");
-        } finally {
             channels.clear();
+            eventLoopGroup.shutdownGracefully(1, 2, TimeUnit.SECONDS).awaitUninterruptibly(3, TimeUnit.SECONDS);
+            log.info("ReplicationSender shutdown complete");
+        } catch (Exception e) {
+            log.warn("Error during shutdown: {}", e.getMessage());
         }
     }
 

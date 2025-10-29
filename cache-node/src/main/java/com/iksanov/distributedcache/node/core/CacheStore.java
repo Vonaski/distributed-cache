@@ -6,4 +6,12 @@ public interface CacheStore {
     void delete(String key);
     int size();
     void clear();
+
+    default void put(String key, String value, long timestamp) {
+        put(key, value);
+    }
+
+    default void delete(String key, long timestamp) {
+        delete(key);
+    }
 }

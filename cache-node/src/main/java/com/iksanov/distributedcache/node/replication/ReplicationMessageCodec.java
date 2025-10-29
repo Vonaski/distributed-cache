@@ -30,7 +30,7 @@ public class ReplicationMessageCodec extends MessageToMessageCodec<ByteBuf, Repl
             buf.writeInt(valueBytes.length);
             buf.writeBytes(valueBytes);
         } else {
-            buf.writeInt(0);
+            buf.writeInt(-1);
         }
 
         buf.writeLong(task.timestamp());
@@ -40,7 +40,7 @@ public class ReplicationMessageCodec extends MessageToMessageCodec<ByteBuf, Repl
             buf.writeInt(originBytes.length);
             buf.writeBytes(originBytes);
         } else {
-            buf.writeInt(0);
+            buf.writeInt(-1);
         }
         out.add(buf);
     }
@@ -62,26 +62,34 @@ public class ReplicationMessageCodec extends MessageToMessageCodec<ByteBuf, Repl
 
         int valueLen = buf.readInt();
         String value = null;
-        if (valueLen > 0) {
+        if (valueLen >= 0) {
             if (valueLen > 64 * 1024) {
                 throw new CorruptedFrameException("Value too long: " + valueLen);
             }
-            byte[] valueBytes = new byte[valueLen];
-            buf.readBytes(valueBytes);
-            value = new String(valueBytes, StandardCharsets.UTF_8);
+            if (valueLen > 0) {
+                byte[] valueBytes = new byte[valueLen];
+                buf.readBytes(valueBytes);
+                value = new String(valueBytes, StandardCharsets.UTF_8);
+            } else {
+                value = "";
+            }
         }
 
         long timestamp = buf.readLong();
 
         int originLen = buf.readInt();
         String origin = null;
-        if (originLen > 0) {
+        if (originLen >= 0) {
             if (originLen > 1024) {
                 throw new CorruptedFrameException("Origin too long: " + originLen);
             }
-            byte[] originBytes = new byte[originLen];
-            buf.readBytes(originBytes);
-            origin = new String(originBytes, StandardCharsets.UTF_8);
+            if (originLen > 0) {
+                byte[] originBytes = new byte[originLen];
+                buf.readBytes(originBytes);
+                origin = new String(originBytes, StandardCharsets.UTF_8);
+            } else {
+                origin = "";
+            }
         }
         out.add(new ReplicationTask(key, value, operation, timestamp, origin));
     }
