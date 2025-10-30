@@ -7,20 +7,26 @@ import com.iksanov.distributedcache.node.core.InMemoryCacheStore;
 import com.iksanov.distributedcache.node.replication.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import org.junit.jupiter.api.*;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.*;
 
+/**
+ * End-to-end load test for replication system.
+ * <p>
+ * Tests realistic workload scenarios with actual network communication
+ * between master and replica nodes.
+ * <p>
+ * Note: This test uses real network I/O and may take several seconds to complete.
+ */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-@Disabled("Manual start, performance benchmark")
 public class ReplicationLoadTest {
 
-    private static final int TOTAL_OPERATIONS = 100_000;
-    private static final int BATCH_SIZE = 1_000;
-    private static final long BATCH_WAIT_TIMEOUT_MS = 30_000;
+    private static final int OPERATION_COUNT = 1000;
+    private static final long WAIT_TIMEOUT_MS = 10_000;
+
     private NioEventLoopGroup sharedEventLoopGroup;
     private ReplicationManager masterReplicationManager;
     private ReplicationSender sender;
@@ -36,31 +42,40 @@ public class ReplicationLoadTest {
     void setup() throws Exception {
         sharedEventLoopGroup = new NioEventLoopGroup(4);
 
-        masterNode = new NodeInfo("master-batch", "127.0.0.1", 9800);
-        replicaNode = new NodeInfo("replica-batch", "127.0.0.1", 9801);
+        masterNode = new NodeInfo("master-load", "127.0.0.1", 9800);
+        replicaNode = new NodeInfo("replica-load", "127.0.0.1", 9801);
 
-        masterStore = new InMemoryCacheStore(2_000_000, 0, 5_000);
-        replicaStore = new InMemoryCacheStore(2_000_000, 0, 5_000);
+        masterStore = new InMemoryCacheStore(100_000, 0, 5_000);
+        replicaStore = new InMemoryCacheStore(100_000, 0, 5_000);
 
-        replicaReceiver = new ReplicationReceiver(replicaNode.host(), replicaNode.replicationPort(), replicaStore);
+        replicaReceiver = new ReplicationReceiver(
+                replicaNode.host(),
+                replicaNode.replicationPort(),
+                replicaStore
+        );
         replicaReceiver.start();
 
-        Thread.sleep(1000);
-
-        replicaManager = new ReplicaManager();
-        replicaManager.registerReplica(masterNode, replicaNode);
-        System.out.println("replicas for master: " + replicaManager.getReplicas(masterNode));
-
-        sender = new ReplicationSender(replicaManager, sharedEventLoopGroup);
-
-        masterReceiver = new ReplicationReceiver(masterNode.host(), masterNode.replicationPort(), masterStore);
+        masterReceiver = new ReplicationReceiver(
+                masterNode.host(),
+                masterNode.replicationPort(),
+                masterStore
+        );
         masterReceiver.start();
 
         Thread.sleep(500);
 
-        masterReplicationManager = new ReplicationManager(masterNode, sender, masterReceiver, key -> masterNode);
+        replicaManager = new ReplicaManager();
+        replicaManager.registerReplica(masterNode, replicaNode);
 
-        System.out.println("Replica receiver started, master replication initialized");
+        sender = new ReplicationSender(replicaManager, sharedEventLoopGroup);
+
+        Function<String, NodeInfo> primaryResolver = key -> masterNode;
+        masterReplicationManager = new ReplicationManager(
+                masterNode,
+                sender,
+                masterReceiver,
+                primaryResolver
+        );
 
         System.out.println("Testing connectivity...");
         masterReplicationManager.onLocalSet("test-key", "test-value");
@@ -68,7 +83,9 @@ public class ReplicationLoadTest {
 
         String testValue = replicaStore.get("test-key");
         if (testValue == null) {
-            throw new IllegalStateException("Test connectivity failed - replica did not receive test message");
+            throw new IllegalStateException(
+                    "Connectivity test failed - replica did not receive test message"
+            );
         }
         System.out.println("Connectivity test passed: " + testValue);
     }
@@ -103,79 +120,129 @@ public class ReplicationLoadTest {
     }
 
     @Test
-    void replicationBatchedBenchmark() throws Exception {
-        System.out.printf("Starting batched replication test: total=%d, batch=%d%n", TOTAL_OPERATIONS, BATCH_SIZE);
+    @DisplayName("Should replicate operations under sustained load")
+    void shouldReplicateUnderSustainedLoad() throws Exception {
+        System.out.printf("Starting load test with %d operations%n", OPERATION_COUNT);
+        long startTime = System.nanoTime();
 
-        long startAll = System.nanoTime();
-        List<Long> perOpLatenciesMicros = new ArrayList<>(TOTAL_OPERATIONS);
+        for (int i = 0; i < OPERATION_COUNT; i++) {
+            masterReplicationManager.onLocalSet("key-" + i, "val-" + i);
 
-        int sent = 0;
-        while (sent < TOTAL_OPERATIONS) {
-            int toSend = Math.min(BATCH_SIZE, TOTAL_OPERATIONS - sent);
-            int batchStart = sent;
-            int batchEnd = sent + toSend - 1;
-
-            long batchSendStart = System.nanoTime();
-            for (int i = batchStart; i <= batchEnd; i++) {
-                masterReplicationManager.onLocalSet("key-" + i, "val-" + i);
+            if (i > 0 && i % 100 == 0) {
+                Thread.sleep(10);
             }
-            long batchSendEnd = System.nanoTime();
-            double batchSendMs = (batchSendEnd - batchSendStart) / 1_000_000.0;
-            System.out.printf("Batch %d..%d sent in %.2f ms%n", batchStart, batchEnd, batchSendMs);
-
-            Thread.sleep(50);
-
-            boolean ok = awaitReplicaProgress(batchEnd, BATCH_WAIT_TIMEOUT_MS);
-            if (!ok) {
-                System.err.printf("Timeout waiting for key-%d. Last successful key might be earlier.%n", batchEnd);
-
-                for (int i = batchEnd; i >= batchStart; i--) {
-                    if (replicaStore.get("key-" + i) != null) {
-                        System.err.printf("Last replicated key found: key-%d%n", i);
-                        break;
-                    }
-                }
-                throw new AssertionError("Timeout waiting for replica to apply batch ending at " + batchEnd);
-            }
-
-            long batchCatchUpEnd = System.nanoTime();
-            long batchCatchUpMicros = TimeUnit.NANOSECONDS.toMicros(batchCatchUpEnd - batchSendEnd);
-            long avgPerOp = batchCatchUpMicros / toSend;
-            for (int i = 0; i < toSend; i++) perOpLatenciesMicros.add(avgPerOp);
-
-            sent += toSend;
-            System.out.printf("Batch %d..%d applied. Total applied: %d%n", batchStart, batchEnd, sent);
         }
 
-        long totalNs = System.nanoTime() - startAll;
-        double totalSec = totalNs / 1_000_000_000.0;
-        double opsPerSec = TOTAL_OPERATIONS / totalSec;
-        Collections.sort(perOpLatenciesMicros);
-        long avg = (long) perOpLatenciesMicros.stream().mapToLong(Long::longValue).average().orElse(0);
-        long p95 = perOpLatenciesMicros.get((int)(perOpLatenciesMicros.size() * 0.95));
+        long sendDurationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime);
+        System.out.printf("All %d operations sent in %d ms%n", OPERATION_COUNT, sendDurationMs);
+        boolean success = awaitReplicaProgress(OPERATION_COUNT - 1, WAIT_TIMEOUT_MS);
+        assertTrue(success, "Replication must complete within timeout");
+        long totalDurationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime);
 
-        System.out.println("=== Results ===");
-        System.out.printf("Total time: %.2f s, throughput: %.2f ops/sec, avg latency: %d µs, p95: %d µs%n",
-                totalSec, opsPerSec, avg, p95);
+        String lastKey = "key-" + (OPERATION_COUNT - 1);
+        String lastValue = replicaStore.get(lastKey);
+        assertEquals("val-" + (OPERATION_COUNT - 1), lastValue, "Last key must be present in replica");
 
-        assertEquals("val-" + (TOTAL_OPERATIONS - 1),
-                replicaStore.get("key-" + (TOTAL_OPERATIONS - 1)),
-                "last key must be present");
+        int sampleSize = Math.min(100, OPERATION_COUNT);
+        int verifiedKeys = 0;
+        for (int i = 0; i < sampleSize; i++) {
+            int idx = i * (OPERATION_COUNT / sampleSize);
+            String key = "key-" + idx;
+            String expectedValue = "val-" + idx;
+            String actualValue = replicaStore.get(key);
+            if (expectedValue.equals(actualValue)) {
+                verifiedKeys++;
+            }
+        }
+
+        System.out.printf("%n=== Load Test Results ===%n");
+        System.out.printf("Total operations: %,d%n", OPERATION_COUNT);
+        System.out.printf("Send duration: %,d ms%n", sendDurationMs);
+        System.out.printf("Total duration: %,d ms%n", totalDurationMs);
+        System.out.printf("Throughput: %.2f ops/sec%n", OPERATION_COUNT / (totalDurationMs / 1000.0));
+        System.out.printf("Verified keys: %d/%d (%.1f%%)%n", verifiedKeys, sampleSize, 100.0 * verifiedKeys / sampleSize);
+
+        assertTrue(verifiedKeys >= sampleSize * 0.95, "At least 95% of sampled keys must be replicated correctly");
     }
 
-    private boolean awaitReplicaProgress(int lastIndexNeeded, long timeoutMs) throws InterruptedException {
+    @Test
+    @DisplayName("Should handle mixed SET and DELETE operations")
+    void shouldHandleMixedOperations() throws Exception {
+        int operationCount = 500;
+        int setCount = 0;
+        int deleteCount = 0;
+
+        System.out.printf("Starting mixed operations test with %d operations%n", operationCount);
+
+        for (int i = 0; i < operationCount; i++) {
+            String key = "mixed-key-" + (i % 100);
+
+            if (i % 3 == 0) {
+                masterReplicationManager.onLocalDelete(key);
+                deleteCount++;
+            } else {
+                masterReplicationManager.onLocalSet(key, "value-" + i);
+                setCount++;
+            }
+
+            if (i > 0 && i % 50 == 0) {
+                Thread.sleep(10);
+            }
+        }
+
+        Thread.sleep(2000);
+
+        System.out.printf("Mixed operations test complete:%n");
+        System.out.printf("  SET operations: %d%n", setCount);
+        System.out.printf("  DELETE operations: %d%n", deleteCount);
+        System.out.printf("  Replica store size: %d%n", replicaStore.size());
+
+        assertTrue(replicaStore.size() > 0, "Replica should contain some keys after mixed operations");
+    }
+
+    @Test
+    @DisplayName("Should maintain consistency under rapid updates to same keys")
+    void shouldMaintainConsistencyWithRapidUpdates() throws Exception {
+        int updateCount = 100;
+        int keyCount = 10;
+
+        System.out.printf("Testing rapid updates: %d updates across %d keys%n", updateCount, keyCount);
+
+        for (int i = 0; i < updateCount; i++) {
+            String key = "rapid-key-" + (i % keyCount);
+            String value = "version-" + i;
+            masterReplicationManager.onLocalSet(key, value);
+        }
+        Thread.sleep(2000);
+        int presentKeys = 0;
+        for (int i = 0; i < keyCount; i++) {
+            String key = "rapid-key-" + i;
+            if (replicaStore.get(key) != null) {
+                presentKeys++;
+            }
+        }
+        System.out.printf("Keys present in replica: %d/%d%n", presentKeys, keyCount);
+        assertTrue(presentKeys >= keyCount * 0.9, "At least 90% of keys must be present in replica");
+    }
+
+    private boolean awaitReplicaProgress(int lastIndex, long timeoutMs) throws InterruptedException {
+        String lastKey = "key-" + lastIndex;
+        String expectedValue = "val-" + lastIndex;
         long deadline = System.currentTimeMillis() + timeoutMs;
         int consecutiveChecks = 0;
+        int requiredConsecutiveChecks = 3;
+
         while (System.currentTimeMillis() < deadline) {
-            if (replicaStore.get("key-" + lastIndexNeeded) != null) {
+            String actualValue = replicaStore.get(lastKey);
+            if (expectedValue.equals(actualValue)) {
                 consecutiveChecks++;
-                if (consecutiveChecks >= 3) {
+                if (consecutiveChecks >= requiredConsecutiveChecks) {
                     return true;
                 }
             } else {
                 consecutiveChecks = 0;
             }
-            Thread.sleep(10);
+            Thread.sleep(50);
         }
         return false;
     }

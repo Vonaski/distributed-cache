@@ -168,7 +168,7 @@ public final class ReplicationReceiver {
 
         try {
             switch (task.operation()) {
-                case SET -> store.put(task.key(), task.value(), task.timestamp());
+                case SET -> store.put(task.key(), task.value());
                 case DELETE -> store.delete(task.key());
                 default -> log.warn("Unknown replication operation: {}", task.operation());
             }

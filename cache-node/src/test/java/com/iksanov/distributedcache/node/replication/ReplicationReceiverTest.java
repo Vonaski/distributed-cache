@@ -41,7 +41,7 @@ public class ReplicationReceiverTest {
 
         receiver.applyTask(task);
 
-        verify(store, times(1)).put("key-1", "value-1", task.timestamp());
+        verify(store, times(1)).put("key-1", "value-1");
     }
 
     @Test
@@ -61,7 +61,7 @@ public class ReplicationReceiverTest {
 
         receiver.applyTask(selfTask);
 
-        verify(store, never()).put(anyString(), anyString(), anyLong());
+        verify(store, never()).put(anyString(), anyString());
         verify(store, never()).delete(anyString());
     }
 
@@ -72,7 +72,7 @@ public class ReplicationReceiverTest {
 
         receiver.applyTask(externalTask);
 
-        verify(store, times(1)).put("key-ext", "value-ext", externalTask.timestamp());
+        verify(store, times(1)).put("key-ext", "value-ext");
     }
 
     @Test
@@ -80,7 +80,7 @@ public class ReplicationReceiverTest {
     void shouldHandleNullTask() {
         assertDoesNotThrow(() -> receiver.applyTask(null));
 
-        verify(store, never()).put(anyString(), anyString(), anyLong());
+        verify(store, never()).put(anyString(), anyString());
         verify(store, never()).delete(anyString());
     }
 
@@ -92,7 +92,7 @@ public class ReplicationReceiverTest {
         ReplicationTask task = ReplicationTask.ofSet("key", "value", "any-origin");
         receiverNoId.applyTask(task);
 
-        verify(store, times(1)).put("key", "value", task.timestamp());
+        verify(store, times(1)).put("key", "value");
     }
 
     @Test
@@ -104,7 +104,7 @@ public class ReplicationReceiverTest {
         ReplicationTask taskFromSelf = ReplicationTask.ofSet("k", "v", nodeId);
         receiverX.applyTask(taskFromSelf);
 
-        verify(store, never()).put(anyString(), anyString(), anyLong());
+        verify(store, never()).put(anyString(), anyString());
     }
 
     @Test
@@ -118,9 +118,9 @@ public class ReplicationReceiverTest {
         receiver.applyTask(task2);
         receiver.applyTask(task3);
 
-        verify(store, times(1)).put("k1", "v1", task1.timestamp());
-        verify(store, times(1)).put("k2", "v2", task2.timestamp());
-        verify(store, times(1)).put("k3", "v3", task3.timestamp());
+        verify(store, times(1)).put("k1", "v1");
+        verify(store, times(1)).put("k2", "v2");
+        verify(store, times(1)).put("k3", "v3");
     }
 
     @Test
@@ -145,7 +145,7 @@ public class ReplicationReceiverTest {
         receiver.applyTask(set);
         receiver.applyTask(delete);
 
-        verify(store, times(1)).put("key", "value", set.timestamp());
+        verify(store, times(1)).put("key", "value");
         verify(store, times(1)).delete("key");
     }
 
@@ -158,7 +158,7 @@ public class ReplicationReceiverTest {
 
         receiver.applyTask(task);
 
-        verify(store, times(1)).put("key", "value", customTimestamp);
+        verify(store, times(1)).put("key", "value");
     }
 
     @Test
@@ -195,7 +195,7 @@ public class ReplicationReceiverTest {
     @DisplayName("applyTask() should not throw when store throws exception")
     void shouldHandleStoreExceptions() {
         doThrow(new RuntimeException("Store failure"))
-                .when(store).put(anyString(), anyString(), anyLong());
+                .when(store).put(anyString(), anyString());
 
         ReplicationTask task = ReplicationTask.ofSet("key", "value", "node-B");
 

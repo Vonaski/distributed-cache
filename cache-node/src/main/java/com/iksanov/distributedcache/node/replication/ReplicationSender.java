@@ -199,7 +199,7 @@ public class ReplicationSender {
         }
     }
 
-    ConcurrentMap<String, Channel> channelsMap() {
+    public ConcurrentMap<String, Channel> channelsMap() {
         return channels;
     }
 }

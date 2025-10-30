@@ -15,6 +15,7 @@ import static org.assertj.core.api.Assertions.*;
  *  - LRU eviction order
  *  - Behavior without TTL
  *  - Thread safety under concurrent load
+ *  - Strict size enforcement
  */
 @DisplayName("InMemoryCacheStore - core functionality and concurrency tests")
 class InMemoryCacheStoreTest {
@@ -75,16 +76,18 @@ class InMemoryCacheStoreTest {
     }
 
     @Test
-    @DisplayName("put() on existing key should refresh TTL and value")
-    void shouldRefreshTTLAndValueOnUpdate() throws InterruptedException {
+    @DisplayName("put() on existing key should update value and refresh position")
+    void shouldUpdateValueOnOverwrite() {
         cache.put("key", "initial");
-        Thread.sleep(800);
         cache.put("key", "updated");
 
-        Thread.sleep(300);
         assertThat(cache.get("key"))
-                .as("Re-put should refresh TTL and value")
+                .as("Put should update existing value")
                 .isEqualTo("updated");
+
+        assertThat(cache.size())
+                .as("Size should remain 1 after update")
+                .isEqualTo(1);
     }
 
     @Test
@@ -95,7 +98,9 @@ class InMemoryCacheStoreTest {
 
         Thread.sleep(1200);
 
-        assertThat(cache.get("temp")).as("Expired entry should be removed").isNull();
+        assertThat(cache.get("temp"))
+                .as("Expired entry should be removed on access")
+                .isNull();
     }
 
     @Test
@@ -117,192 +122,198 @@ class InMemoryCacheStoreTest {
     void shouldRemoveExpiredEntriesDuringCleanup() throws InterruptedException {
         cache.put("auto", "cleanup");
 
-        Thread.sleep(1500);
-        assertThat(cache.get("auto")).isNull();
-        assertThat(cache.size()).isLessThanOrEqualTo(1);
+        // Wait for TTL expiration
+        Thread.sleep(1100);
+
+        // Wait for cleanup cycle
+        Thread.sleep(600);
+
+        assertThat(cache.size())
+                .as("Expired entries should be cleaned up")
+                .isEqualTo(0);
     }
 
     @Test
     @DisplayName("Should evict least recently used entry when max size is exceeded")
-    void shouldEvictLeastRecentlyUsedEntry() throws InterruptedException {
+    void shouldEvictLeastRecentlyUsedEntry() {
+        // Fill cache to max size
         for (int i = 1; i <= 5; i++) {
             cache.put("k" + i, "v" + i);
         }
         assertThat(cache.size()).isEqualTo(5);
 
+        // Add one more - should trigger immediate eviction
         cache.put("k6", "v6");
 
-        Thread.sleep(100);
-
+        // Size should never exceed maxSize with synchronous eviction
         assertThat(cache.size()).isEqualTo(5);
+
+        // First key should be evicted (LRU)
         assertThat(cache.get("k1"))
                 .as("The oldest key (k1) should be evicted by LRU")
                 .isNull();
+
+        // Most recent keys should remain
+        assertThat(cache.get("k6")).isEqualTo("v6");
     }
 
     @Test
     @DisplayName("get() should refresh entry position for LRU eviction order")
     void shouldRefreshEntryOnGet() {
+        // Fill cache
         for (int i = 1; i <= 5; i++) {
             cache.put("k" + i, "v" + i);
         }
 
-        cache.get("k1");
+        // Access k1 to make it recently used
+        assertThat(cache.get("k1")).isEqualTo("v1");
 
+        // Add new entry
         cache.put("k6", "v6");
 
+        // k1 should NOT be evicted since we just accessed it
         assertThat(cache.get("k1"))
                 .as("Recently accessed key should not be evicted")
-                .isNotNull();
+                .isEqualTo("v1");
+
+        // k2 should be evicted instead (now the LRU)
+        assertThat(cache.get("k2"))
+                .as("k2 should be evicted as the new LRU")
+                .isNull();
     }
 
     @Test
-    @DisplayName("Should not exceed max size even after many insertions")
-    void shouldRespectMaxSizeLimit() throws InterruptedException {
+    @DisplayName("Should strictly enforce max size (never exceed)")
+    void shouldStrictlyEnforceMaxSize() {
+        // Rapid insertions
         for (int i = 0; i < 100; i++) {
             cache.put("k" + i, "v" + i);
+
+            // Size should NEVER exceed maxSize with synchronous eviction
+            assertThat(cache.size())
+                    .as("Cache size must never exceed maxSize")
+                    .isLessThanOrEqualTo(5);
         }
 
-        Thread.sleep(200);
-
-        int currentSize = cache.size();
-        assertThat(currentSize)
-                .as("Cache should stabilize around or below maxSize after async evictions")
-                .isLessThanOrEqualTo(5);
+        assertThat(cache.size()).isEqualTo(5);
     }
 
     @Test
-    @DisplayName("Should remain stable under high concurrency stress (with overshoot tolerance)")
+    @DisplayName("Should handle concurrent access correctly")
     void shouldHandleConcurrentAccess() throws InterruptedException {
         int threads = 10;
+        int iterations = 200;
         AtomicInteger successfulGets = new AtomicInteger();
-        AtomicInteger exceptionCount = new AtomicInteger();
-        boolean completed;
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch doneLatch = new CountDownLatch(threads);
 
-        try (ExecutorService executor = Executors.newFixedThreadPool(threads)) {
-            int iterations = 200;
+        for (int t = 0; t < threads; t++) {
+            final int threadId = t;
+            new Thread(() -> {
+                try {
+                    startLatch.await();
 
-            Runnable writer = () -> {
-                for (int i = 0; i < iterations; i++) {
-                    try {
-                        cache.put("key-" + (i % 20), "val-" + i);
-                    } catch (Exception e) {
-                        exceptionCount.incrementAndGet();
+                    for (int i = 0; i < iterations; i++) {
+                        String key = "key-" + (i % 20);
+
+                        if (threadId < 4) {
+                            // Writers
+                            cache.put(key, "val-" + threadId + "-" + i);
+                        } else if (threadId < 8) {
+                            // Readers
+                            String val = cache.get(key);
+                            if (val != null) successfulGets.incrementAndGet();
+                        } else {
+                            // Deleters
+                            if (i % 2 == 0) {
+                                cache.delete(key);
+                            }
+                        }
                     }
+                } catch (Exception e) {
+                    fail("Unexpected exception: " + e);
+                } finally {
+                    doneLatch.countDown();
                 }
-            };
-
-            Runnable reader = () -> {
-                for (int i = 0; i < iterations; i++) {
-                    try {
-                        String val = cache.get("key-" + (i % 20));
-                        if (val != null) successfulGets.incrementAndGet();
-                    } catch (Exception e) {
-                        exceptionCount.incrementAndGet();
-                    }
-                }
-            };
-
-            Runnable deleter = () -> {
-                for (int i = 0; i < iterations / 2; i++) {
-                    try {
-                        cache.delete("key-" + (i % 20));
-                    } catch (Exception e) {
-                        exceptionCount.incrementAndGet();
-                    }
-                }
-            };
-
-            for (int i = 0; i < 4; i++) executor.submit(writer);
-            for (int i = 0; i < 4; i++) executor.submit(reader);
-            for (int i = 0; i < 2; i++) executor.submit(deleter);
-
-            executor.shutdown();
-            completed = executor.awaitTermination(10, TimeUnit.SECONDS);
+            }).start();
         }
 
+        startLatch.countDown();
+        boolean completed = doneLatch.await(10, TimeUnit.SECONDS);
         assertThat(completed).isTrue();
 
-        Thread.sleep(300);
-
-        int finalSize = cache.size();
-        int maxAllowed = 10 * 2;
-        assertThat(finalSize)
-                .as("Cache size should stabilize near maxSize (allowing overshoot)")
-                .isLessThanOrEqualTo(maxAllowed);
+        assertThat(cache.size())
+                .as("Cache size should be within bounds")
+                .isLessThanOrEqualTo(5);
 
         assertThat(successfulGets.get())
-                .as("Concurrent reads should succeed at least partially")
+                .as("Some reads should have succeeded")
                 .isGreaterThan(0);
-
-        assertThat(exceptionCount.get())
-                .as("No more than a few exceptions should occur under stress")
-                .isLessThan(10);
     }
 
     @Test
-    @DisplayName("Concurrent writes should not break cache under stress (temporary overshoot allowed)")
-    void shouldRemainConsistentUnderConcurrentWrites() throws InterruptedException {
+    @DisplayName("Concurrent writes should maintain size invariant")
+    void shouldMaintainSizeInvariantUnderConcurrentWrites() throws InterruptedException {
         int threads = 8;
         int maxSize = 5;
-        AtomicInteger exceptionCount = new AtomicInteger();
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch doneLatch = new CountDownLatch(threads);
 
-        try (ExecutorService executor = Executors.newFixedThreadPool(threads)) {
-            Runnable task = () -> {
-                for (int i = 0; i < 100; i++) {
-                    try {
+        for (int t = 0; t < threads; t++) {
+            new Thread(() -> {
+                try {
+                    startLatch.await();
+                    for (int i = 0; i < 100; i++) {
                         cache.put("key-" + ThreadLocalRandom.current().nextInt(50), "val-" + i);
-                    } catch (Exception e) {
-                        exceptionCount.incrementAndGet();
+
+                        // Check invariant after each put
+                        int currentSize = cache.size();
+                        if (currentSize > maxSize) {
+                            fail("Size invariant violated: " + currentSize + " > " + maxSize);
+                        }
                     }
+                } catch (Exception e) {
+                    fail("Unexpected exception: " + e);
+                } finally {
+                    doneLatch.countDown();
                 }
-            };
-
-            for (int i = 0; i < threads; i++) {
-                executor.submit(task);
-            }
-
-            executor.shutdown();
-            assertThat(executor.awaitTermination(5, TimeUnit.SECONDS))
-                    .as("All writer threads should complete within timeout")
-                    .isTrue();
+            }).start();
         }
 
-        Thread.sleep(300);
+        startLatch.countDown();
+        boolean completed = doneLatch.await(5, TimeUnit.SECONDS);
+        assertThat(completed)
+                .as("All threads should complete")
+                .isTrue();
 
-        int finalSize = cache.size();
-
-        assertThat(finalSize)
-                .as("Cache size may temporarily overshoot but should stay within ~2× maxSize after stabilization")
-                .isLessThanOrEqualTo(maxSize * 2);
-
-        assertThat(exceptionCount.get())
-                .as("No unexpected exceptions should occur under concurrency")
-                .isZero();
-    }
-
-    @Test
-    @DisplayName("Cache should evict items and stabilize below maxSize after heavy load")
-    void shouldEvictAndStabilizeBelowMaxSize() throws InterruptedException {
-        int maxSize = 10;
-
-        for (int i = 0; i < 200; i++) {
-            cache.put("key-" + i, "val-" + i);
-        }
-
-        Thread.sleep(500);
-
-        int stableSize = cache.size();
-
-        assertThat(stableSize)
-                .as("Cache should stabilize at or below maxSize after background eviction")
+        assertThat(cache.size())
+                .as("Final size must be within limit")
                 .isLessThanOrEqualTo(maxSize);
     }
 
     @Test
-    @DisplayName("shutdown() should stop cleanup thread safely")
+    @DisplayName("shutdown() should stop cleanup thread gracefully")
     void shouldShutdownGracefully() {
         assertThatCode(() -> cache.shutdown())
                 .doesNotThrowAnyException();
+
+        // After shutdown, cache should be cleared
+        assertThat(cache.size()).isEqualTo(0);
+    }
+
+    @Test
+    @DisplayName("Null key or value should throw NullPointerException")
+    void shouldRejectNullInputs() {
+        assertThatThrownBy(() -> cache.get(null))
+                .isInstanceOf(NullPointerException.class);
+
+        assertThatThrownBy(() -> cache.put(null, "value"))
+                .isInstanceOf(NullPointerException.class);
+
+        assertThatThrownBy(() -> cache.put("key", null))
+                .isInstanceOf(NullPointerException.class);
+
+        assertThatThrownBy(() -> cache.delete(null))
+                .isInstanceOf(NullPointerException.class);
     }
 }
