@@ -5,6 +5,8 @@
         <encoder class="net.logstash.logback.encoder.LogstashEncoder">
             <includeContext>true</includeContext>
             <includeMdc>true</includeMdc>
+            <includeStructuredArguments>true</includeStructuredArguments>
+            <includeTags>true</includeTags>
         </encoder>
     </appender>
 
@@ -14,7 +16,7 @@
         </http>
         <format>
             <label>
-                <pattern>app=cache-node,node=${CACHE_NODE_ID:-unknown},level=%level</pattern>
+                <pattern>app=proxy,host=${HOSTNAME},level=%level</pattern>
             </label>
             <message>
                 <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
@@ -27,7 +29,7 @@
         <appender-ref ref="LOKI"/>
     </root>
 
-    <logger name="com.iksanov.distributedcache.node" level="DEBUG"/>
-    <logger name="com.iksanov.distributedcache.common" level="DEBUG"/>
+    <logger name="com.iksanov.distributedcache.proxy" level="DEBUG"/>
+    <logger name="org.springframework.web" level="INFO"/>
     <logger name="io.netty" level="INFO"/>
 </configuration>

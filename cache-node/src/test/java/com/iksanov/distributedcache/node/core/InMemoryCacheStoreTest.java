@@ -1,12 +1,10 @@
 package com.iksanov.distributedcache.node.core;
 
+import com.iksanov.distributedcache.node.metrics.CacheMetrics;
 import org.junit.jupiter.api.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
-
 import static org.assertj.core.api.Assertions.*;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.AssertionsKt.assertNull;
 
 /**
  * Comprehensive tests for {@link InMemoryCacheStore} with Approximate LRU.
@@ -16,10 +14,11 @@ import static org.junit.jupiter.api.AssertionsKt.assertNull;
 class InMemoryCacheStoreTest {
 
     private InMemoryCacheStore cache;
+    private final CacheMetrics metrics = new CacheMetrics();
 
     @BeforeEach
     void setUp() {
-        cache = new InMemoryCacheStore(5, 1000, 500);
+        cache = new InMemoryCacheStore(5, 1000, 500, metrics);
     }
 
     @AfterEach
@@ -100,7 +99,7 @@ class InMemoryCacheStoreTest {
     @Test
     @DisplayName("Entries should not expire when TTL=0 (no expiration)")
     void shouldNotExpireIfTTLIsZero() throws InterruptedException {
-        InMemoryCacheStore noTtlCache = new InMemoryCacheStore(3, 0, 500);
+        InMemoryCacheStore noTtlCache = new InMemoryCacheStore(3, 0, 500, metrics);
 
         noTtlCache.put("key", "value");
         Thread.sleep(2000);
@@ -119,13 +118,10 @@ class InMemoryCacheStoreTest {
 
         Thread.sleep(1200);
 
-        // Trigger lazy cleanup by doing puts
         for (int i = 0; i < 150; i++) {
             cache.put("trigger" + i, "value" + i);
         }
 
-        // The expired entry should eventually be cleaned up
-        // Size should be around maxSize + batch buffer, not maxSize + 1 + all triggers
         assertThat(cache.size())
                 .as("Lazy cleanup should have removed expired entries")
                 .isLessThan(20);
@@ -139,41 +135,13 @@ class InMemoryCacheStoreTest {
         }
         assertThat(cache.size()).isEqualTo(5);
 
-        // Add more entries
         for (int i = 6; i <= 10; i++) {
             cache.put("k" + i, "v" + i);
         }
 
-        // Size should be controlled (at or near maxSize, allowing for batch buffer)
         assertThat(cache.size())
                 .as("Cache size should be controlled after eviction")
                 .isLessThanOrEqualTo(10);
-    }
-
-    @Test
-    @DisplayName("Frequently accessed entries should have lower eviction priority")
-    void shouldFavorFrequentlyAccessedEntries() {
-        // Fill cache
-        for (int i = 1; i <= 5; i++) {
-            cache.put("k" + i, "v" + i);
-        }
-
-        // Make k1 "hot" by accessing it multiple times
-        for (int i = 0; i < 20; i++) {
-            assertThat(cache.get("k1")).isEqualTo("v1");
-        }
-
-        // Add many new entries to trigger evictions
-        for (int i = 6; i <= 20; i++) {
-            cache.put("k" + i, "v" + i);
-        }
-
-        // Hot key should have better survival chance (approximate LRU)
-        // We can't guarantee it due to sampling, but we can verify the mechanism works
-        InMemoryCacheStore.CacheStats stats = cache.getStats();
-        assertThat(stats.evictions)
-                .as("Some evictions should have occurred")
-                .isGreaterThan(0);
     }
 
     @Test
@@ -182,13 +150,11 @@ class InMemoryCacheStoreTest {
         for (int i = 0; i < 100; i++) {
             cache.put("k" + i, "v" + i);
 
-            // Size should never wildly exceed maxSize
             assertThat(cache.size())
                     .as("Cache size must be bounded during insertions")
-                    .isLessThanOrEqualTo(15); // maxSize + reasonable batch buffer
+                    .isLessThanOrEqualTo(15);
         }
 
-        // Final size should be at maxSize
         assertThat(cache.size())
                 .as("Final cache size should be at maxSize")
                 .isLessThanOrEqualTo(10);
@@ -203,7 +169,6 @@ class InMemoryCacheStoreTest {
         CountDownLatch startLatch = new CountDownLatch(1);
         CountDownLatch doneLatch = new CountDownLatch(threads);
 
-        // Pre-populate with stable keys
         for (int i = 0; i < 5; i++) {
             cache.put("stable-" + i, "value-" + i);
         }
@@ -260,7 +225,7 @@ class InMemoryCacheStoreTest {
     @DisplayName("Concurrent writes should maintain size bounds")
     void shouldMaintainSizeBoundsUnderConcurrentWrites() throws InterruptedException {
         int threads = 8;
-        int maxAllowedSize = 15; // maxSize + batch buffer
+        int maxAllowedSize = 15;
         CountDownLatch startLatch = new CountDownLatch(1);
         CountDownLatch doneLatch = new CountDownLatch(threads);
 
@@ -321,70 +286,5 @@ class InMemoryCacheStoreTest {
 
         assertThatThrownBy(() -> cache.delete(null))
                 .isInstanceOf(NullPointerException.class);
-    }
-
-    @Test
-    @DisplayName("Cache stats should track hits, misses, and evictions")
-    void shouldTrackCacheStats() {
-        InMemoryCacheStore testCache = new InMemoryCacheStore(10, 0, 10000);
-        testCache.put("key1", "value1");
-        testCache.put("key2", "value2");
-        testCache.get("key1"); // hit
-        testCache.get("key1"); // hit
-        testCache.get("missing"); // miss
-        InMemoryCacheStore.CacheStats stats = testCache.getStats();
-        assertThat(stats.hits).isEqualTo(2);
-        assertThat(stats.misses).isEqualTo(1);
-        assertThat(stats.hitRate).isCloseTo(66.67, within(0.1));
-        assertThat(stats.size).isEqualTo(2);
-        testCache.shutdown();
-    }
-
-    @Test
-    @DisplayName("Hit rate calculation should be accurate")
-    void shouldCalculateHitRateCorrectly() {
-        InMemoryCacheStore largeCache = new InMemoryCacheStore(20, 0, 10000);
-
-        for (int i = 0; i < 10; i++) {
-            largeCache.put("key" + i, "value" + i);
-        }
-
-        for (int i = 0; i < 7; i++) {
-            assertNotNull(largeCache.get("key" + i));
-        }
-
-        for (int i = 100; i < 103; i++) {
-            assertNull(largeCache.get("key" + i));
-        }
-
-        double hitRate = largeCache.getHitRate();
-        assertThat(hitRate)
-                .as("Hit rate should be 70% (7 hits out of 10 total accesses)")
-                .isCloseTo(70.0, within(0.1));
-
-        InMemoryCacheStore.CacheStats stats = largeCache.getStats();
-        assertThat(stats.hits).isEqualTo(7);
-        assertThat(stats.misses).isEqualTo(3);
-        largeCache.shutdown();
-    }
-
-    @Test
-    @DisplayName("Should track eviction count in stats")
-    void shouldTrackEvictions() {
-        InMemoryCacheStore smallCache = new InMemoryCacheStore(5, 0, 10000);
-        for (int i = 0; i < 20; i++) {
-            smallCache.put("key" + i, "value" + i);
-        }
-        InMemoryCacheStore.CacheStats stats = smallCache.getStats();
-
-        assertThat(stats.evictions)
-                .as("Evictions should have occurred")
-                .isGreaterThan(0);
-
-        assertThat(stats.size)
-                .as("Size should be controlled")
-                .isLessThanOrEqualTo(10);
-
-        smallCache.shutdown();
     }
 }

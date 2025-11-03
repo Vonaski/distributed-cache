@@ -6,6 +6,8 @@ import com.iksanov.distributedcache.common.cluster.sharding.ConsistentHashRing;
 import com.iksanov.distributedcache.node.config.ApplicationConfig;
 import com.iksanov.distributedcache.node.config.ApplicationConfig.NodeRole;
 import com.iksanov.distributedcache.node.core.InMemoryCacheStore;
+import com.iksanov.distributedcache.node.metrics.CacheMetrics;
+import com.iksanov.distributedcache.node.metrics.MetricsServer;
 import com.iksanov.distributedcache.node.net.NetServer;
 import com.iksanov.distributedcache.node.replication.ReplicationManager;
 import com.iksanov.distributedcache.node.replication.ReplicationReceiver;
@@ -29,6 +31,8 @@ public class CacheNodeApplication {
     private ReplicationReceiver replicationReceiver;
     private ReplicationSender replicationSender;
     private final CountDownLatch shutdownLatch = new CountDownLatch(1);
+    private CacheMetrics metrics;
+    private MetricsServer metricsServer;
 
     public CacheNodeApplication(ApplicationConfig config) {
         this.config = config;
@@ -49,8 +53,15 @@ public class CacheNodeApplication {
 
     public void start() {
         try {
-            cache = new InMemoryCacheStore(config.cacheMaxSize(), config.cacheTtlMillis(), 5000);
+            metrics = new CacheMetrics();
+            log.info("✓ Metrics initialized");
+
+            cache = new InMemoryCacheStore(config.cacheMaxSize(), config.cacheTtlMillis(), 5000, metrics);
             log.info("✓ Cache initialized (size={})", config.cacheMaxSize());
+
+            metricsServer = new MetricsServer(8081, metrics);
+            metricsServer.start();
+            log.info("✓ Metrics server started on port 8081");
 
             if (config.clusterEnabled()) {
                 replicationManager = initCluster();
@@ -59,13 +70,14 @@ public class CacheNodeApplication {
 
             netServer = new NetServer(config.toNetServerConfig(), cache, replicationManager);
             netServer.start();
-
             log.info("✓ Server listening on {}:{}", config.host(), config.port());
 
             Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown, "shutdown-hook"));
 
             log.info("========================================");
             log.info("✅ CacheNode ready!");
+            log.info("   Cache port: {}", config.port());
+            log.info("   Metrics port: 8081");
             log.info("========================================");
 
         } catch (Exception e) {
@@ -152,6 +164,10 @@ public class CacheNodeApplication {
         log.info("========================================");
 
         try {
+            if (metricsServer != null) {
+                metricsServer.shutdown();
+            }
+
             if (netServer != null) {
                 log.info("Stopping NetServer...");
                 netServer.stop();

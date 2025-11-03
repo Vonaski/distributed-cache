@@ -4,6 +4,7 @@ import com.iksanov.distributedcache.common.cluster.NodeInfo;
 import com.iksanov.distributedcache.common.cluster.ReplicaManager;
 import com.iksanov.distributedcache.node.core.CacheStore;
 import com.iksanov.distributedcache.node.core.InMemoryCacheStore;
+import com.iksanov.distributedcache.node.metrics.CacheMetrics;
 import com.iksanov.distributedcache.node.replication.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import org.junit.jupiter.api.*;
@@ -37,16 +38,18 @@ public class ReplicationLoadTest {
     private ReplicaManager replicaManager;
     private ReplicationReceiver replicaReceiver;
     private ReplicationReceiver masterReceiver;
+    private CacheMetrics metrics;
 
     @BeforeAll
     void setup() throws Exception {
         sharedEventLoopGroup = new NioEventLoopGroup(4);
+        metrics = new CacheMetrics();
 
         masterNode = new NodeInfo("master-load", "127.0.0.1", 9800);
         replicaNode = new NodeInfo("replica-load", "127.0.0.1", 9801);
 
-        masterStore = new InMemoryCacheStore(100_000, 0, 5_000);
-        replicaStore = new InMemoryCacheStore(100_000, 0, 5_000);
+        masterStore = new InMemoryCacheStore(100_000, 0, 5_000, metrics);
+        replicaStore = new InMemoryCacheStore(100_000, 0, 5_000, metrics);
 
         replicaReceiver = new ReplicationReceiver(
                 replicaNode.host(),

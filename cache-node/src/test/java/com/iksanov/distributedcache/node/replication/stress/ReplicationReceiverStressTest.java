@@ -1,6 +1,7 @@
 package com.iksanov.distributedcache.node.replication.stress;
 
 import com.iksanov.distributedcache.node.core.InMemoryCacheStore;
+import com.iksanov.distributedcache.node.metrics.CacheMetrics;
 import com.iksanov.distributedcache.node.replication.ReplicationReceiver;
 import com.iksanov.distributedcache.node.replication.ReplicationTask;
 import org.junit.jupiter.api.DisplayName;
@@ -22,10 +23,12 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 public class ReplicationReceiverStressTest {
 
+    private final CacheMetrics metrics = new CacheMetrics();
+
     @Test
     @DisplayName("Should handle high concurrent load with consistency")
     void shouldHandleHighConcurrentLoadWithConsistency() throws Exception {
-        InMemoryCacheStore store = new InMemoryCacheStore(10_000, 60_000, 10_000);
+        InMemoryCacheStore store = new InMemoryCacheStore(10_000, 60_000, 10_000,  metrics);
         ReplicationReceiver receiver = new ReplicationReceiver("127.0.0.1", 0, store);
 
         final int threads = 8;
@@ -106,7 +109,7 @@ public class ReplicationReceiverStressTest {
     @Test
     @DisplayName("Should handle mixed SET and DELETE operations under load")
     void shouldHandleMixedOperationsUnderLoad() throws Exception {
-        InMemoryCacheStore store = new InMemoryCacheStore(5_000, 60_000, 10_000);
+        InMemoryCacheStore store = new InMemoryCacheStore(5_000, 60_000, 10_000,  metrics);
         ReplicationReceiver receiver = new ReplicationReceiver("127.0.0.1", 0, store);
 
         final int threads = 6;
@@ -155,7 +158,7 @@ public class ReplicationReceiverStressTest {
     @Test
     @DisplayName("Should handle rapid sequential operations")
     void shouldHandleRapidSequentialOperations() {
-        InMemoryCacheStore store = new InMemoryCacheStore(10_000, 60_000, 10_000);
+        InMemoryCacheStore store = new InMemoryCacheStore(10_000, 60_000, 10_000,  metrics);
         ReplicationReceiver receiver = new ReplicationReceiver("127.0.0.1", 0, store);
 
         int operationCount = 50_000;
@@ -183,7 +186,7 @@ public class ReplicationReceiverStressTest {
     @Test
     @DisplayName("Should handle null task gracefully")
     void shouldHandleNullTaskGracefully() {
-        InMemoryCacheStore store = new InMemoryCacheStore(100, 0, 500);
+        InMemoryCacheStore store = new InMemoryCacheStore(100, 0, 500,  metrics);
         ReplicationReceiver receiver = new ReplicationReceiver("127.0.0.1", 0, store);
         assertDoesNotThrow(() -> receiver.applyTask(null));
     }
@@ -191,7 +194,7 @@ public class ReplicationReceiverStressTest {
     @Test
     @DisplayName("Should maintain consistency with concurrent updates to same key")
     void shouldMaintainConsistencyWithConcurrentUpdates() throws Exception {
-        InMemoryCacheStore store = new InMemoryCacheStore(100, 0, 500);
+        InMemoryCacheStore store = new InMemoryCacheStore(100, 0, 500,  metrics);
         ReplicationReceiver receiver = new ReplicationReceiver("127.0.0.1", 0, store);
 
         String key = "concurrent-key";

@@ -1,12 +1,13 @@
 package com.iksanov.distributedcache.node.core;
 
 import com.iksanov.distributedcache.common.exception.CacheException;
+import com.iksanov.distributedcache.node.metrics.CacheMetrics;
+import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -20,40 +21,45 @@ public class InMemoryCacheStore implements CacheStore {
     private final int maxSize;
     private final long defaultTtlMillis;
     private final ReentrantLock evictionLock = new ReentrantLock();
-    private final AtomicLong hits = new AtomicLong();
-    private final AtomicLong misses = new AtomicLong();
-    private final AtomicLong evictions = new AtomicLong();
+    private final CacheMetrics metrics;
     private static final int SAMPLE_SIZE = 8;
     private static final int EVICTION_BATCH = 5;
     private final AtomicInteger putCounter = new AtomicInteger();
     private static final int LAZY_CLEANUP_INTERVAL = 100;
 
-    public InMemoryCacheStore(int maxSize, long defaultTtlMillis, long cleanupIntervalMillis) {
+    public InMemoryCacheStore(int maxSize, long defaultTtlMillis, long cleanupIntervalMillis, CacheMetrics metrics) {
         if (maxSize <= 0) throw new CacheException("maxSize must be > 0");
         this.maxSize = maxSize;
         this.defaultTtlMillis = defaultTtlMillis;
+        this.metrics = metrics;
         log.info("InMemoryCacheStore initialized: maxSize={}, defaultTTL={}ms, eviction=ApproximateLRU", maxSize, defaultTtlMillis);
     }
 
     @Override
     public String get(String key) {
         Objects.requireNonNull(key, "key");
+        Timer.Sample sample = metrics.startGetTimer();
 
-        CacheEntry entry = store.get(key);
-        if (entry == null) {
-            misses.incrementAndGet();
-            return null;
+        try {
+            CacheEntry entry = store.get(key);
+            if (entry == null) {
+                metrics.recordMiss();
+                return null;
+            }
+
+            if (entry.isExpired()) {
+                store.remove(key, entry);
+                metrics.recordMiss();
+                return null;
+            }
+
+            entry.recordAccess();
+            metrics.recordHit();
+            return entry.value;
+        } finally {
+            metrics.stopGetTimer(sample);
+            metrics.updateSize(store.size());
         }
-
-        if (entry.isExpired()) {
-            store.remove(key, entry);
-            misses.incrementAndGet();
-            return null;
-        }
-
-        entry.recordAccess();
-        hits.incrementAndGet();
-        return entry.value;
     }
 
     @Override
@@ -61,45 +67,54 @@ public class InMemoryCacheStore implements CacheStore {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(value, "value");
 
-        long expireAt = defaultTtlMillis > 0 ? System.currentTimeMillis() + defaultTtlMillis : -1;
-        CacheEntry newEntry = new CacheEntry(key, value, expireAt);
-        CacheEntry previous = store.put(key, newEntry);
+        Timer.Sample sample = metrics.startPutTimer();
 
-        if (previous == null) {
-            if (store.size() > maxSize) {
-                if (evictionLock.tryLock()) {
+        try {
+            long expireAt = defaultTtlMillis > 0 ? System.currentTimeMillis() + defaultTtlMillis : -1;
+            CacheEntry newEntry = new CacheEntry(key, value, expireAt);
+            CacheEntry previous = store.put(key, newEntry);
+
+            if (previous == null) {
+                if (store.size() > maxSize) {
+                    if (evictionLock.tryLock()) {
+                        try {
+                            if (store.size() > maxSize) evictEntries();
+                        } finally {
+                            evictionLock.unlock();
+                        }
+                    }
+                }
+
+                if (store.size() > (maxSize * 12 / 10)) {
+                    evictionLock.lock();
                     try {
-                        if (store.size() > maxSize) evictEntries();
+                        if (store.size() > maxSize) {
+                            log.warn("Hard limit triggered: currentSize={}, maxSize={}, evicting aggressively", store.size(), maxSize);
+                            evictEntriesAggressively();
+                        }
                     } finally {
                         evictionLock.unlock();
                     }
                 }
             }
-
-            if (store.size() > (maxSize * 12 / 10)) {
-                evictionLock.lock();
-                try {
-                    if (store.size() > maxSize) {
-                        log.warn("Hard limit triggered: currentSize={}, maxSize={}, evicting aggressively", store.size(), maxSize);
-                        evictEntriesAggressively();
-                    }
-                } finally {
-                    evictionLock.unlock();
-                }
-            }
+            if (putCounter.incrementAndGet() % LAZY_CLEANUP_INTERVAL == 0) lazyCleanupExpired();
+        } finally {
+            metrics.stopPutTimer(sample);
+            metrics.updateSize(store.size());
         }
-        if (putCounter.incrementAndGet() % LAZY_CLEANUP_INTERVAL == 0) lazyCleanupExpired();
     }
 
     @Override
     public void delete(String key) {
         Objects.requireNonNull(key, "key");
         store.remove(key);
+        metrics.updateSize(store.size());
     }
 
     @Override
     public void clear() {
         store.clear();
+        metrics.updateSize(0);
         log.info("Cache cleared");
     }
 
@@ -110,8 +125,7 @@ public class InMemoryCacheStore implements CacheStore {
 
     public void shutdown() {
         clear();
-        log.info("Cache shutdown - Hits: {}, Misses: {}, HitRate: {:.2f}%, Evictions: {}",
-                hits.get(), misses.get(), getHitRate(), evictions.get());
+        log.info("Cache shutdown");
     }
 
     private void evictEntries() {
@@ -120,7 +134,7 @@ public class InMemoryCacheStore implements CacheStore {
         for (int i = 0; i < toEvict && store.size() > maxSize; i++) {
             CacheEntry victim = findEvictionCandidate();
             if (victim != null && store.remove(victim.key, victim)) {
-                evictions.incrementAndGet();
+                metrics.recordEviction();
             }
         }
     }
@@ -133,7 +147,7 @@ public class InMemoryCacheStore implements CacheStore {
         for (int i = 0; i < toEvict && store.size() > maxSize; i++) {
             CacheEntry victim = findEvictionCandidate();
             if (victim != null && store.remove(victim.key, victim)) {
-                evictions.incrementAndGet();
+                metrics.recordEviction();
                 evicted++;
             }
         }
@@ -189,39 +203,6 @@ public class InMemoryCacheStore implements CacheStore {
 
         if (cleaned > 0) {
             log.debug("Lazy cleanup removed {} expired entries", cleaned);
-        }
-    }
-
-    public double getHitRate() {
-        long h = hits.get();
-        long m = misses.get();
-        long total = h + m;
-        return total == 0 ? 0.0 : (h * 100.0) / total;
-    }
-
-    public CacheStats getStats() {
-        return new CacheStats(hits.get(), misses.get(), getHitRate(), evictions.get(), store.size());
-    }
-
-    public static class CacheStats {
-        public final long hits;
-        public final long misses;
-        public final double hitRate;
-        public final long evictions;
-        public final int size;
-
-        CacheStats(long hits, long misses, double hitRate, long evictions, int size) {
-            this.hits = hits;
-            this.misses = misses;
-            this.hitRate = hitRate;
-            this.evictions = evictions;
-            this.size = size;
-        }
-
-        @Override
-        public String toString() {
-            return String.format("Stats{hits=%d, misses=%d, hitRate=%.2f%%, evictions=%d, size=%d}",
-                    hits, misses, hitRate, evictions, size);
         }
     }
 }
