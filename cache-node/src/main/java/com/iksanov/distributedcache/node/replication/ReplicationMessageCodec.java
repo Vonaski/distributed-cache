@@ -42,20 +42,17 @@ public class ReplicationMessageCodec extends MessageToMessageCodec<ByteBuf, Repl
         } else {
             buf.writeInt(-1);
         }
+        buf.writeLong(task.sequence());
         out.add(buf);
     }
 
     @Override
     protected void decode(ChannelHandlerContext ctx, ByteBuf buf, List<Object> out) {
         int opByte = buf.readByte();
-        ReplicationTask.Operation operation = (opByte == 0)
-                ? ReplicationTask.Operation.SET
-                : ReplicationTask.Operation.DELETE;
+        ReplicationTask.Operation operation = (opByte == 0) ? ReplicationTask.Operation.SET : ReplicationTask.Operation.DELETE;
 
         int keyLen = buf.readInt();
-        if (keyLen <= 0 || keyLen > 1024) {
-            throw new CorruptedFrameException("Invalid key length: " + keyLen);
-        }
+        if (keyLen <= 0 || keyLen > 1024) throw new CorruptedFrameException("Invalid key length: " + keyLen);
         byte[] keyBytes = new byte[keyLen];
         buf.readBytes(keyBytes);
         String key = new String(keyBytes, StandardCharsets.UTF_8);
@@ -91,6 +88,8 @@ public class ReplicationMessageCodec extends MessageToMessageCodec<ByteBuf, Repl
                 origin = "";
             }
         }
-        out.add(new ReplicationTask(key, value, operation, timestamp, origin));
+        long sequence = 0L;
+        if (buf.readableBytes() >= 8) sequence = buf.readLong();
+        out.add(new ReplicationTask(key, value, operation, timestamp, origin, sequence));
     }
 }

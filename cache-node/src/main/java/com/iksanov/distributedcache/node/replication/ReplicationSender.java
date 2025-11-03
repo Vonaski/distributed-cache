@@ -5,6 +5,7 @@ import com.iksanov.distributedcache.common.cluster.ReplicaManager;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
 import io.netty.handler.codec.LengthFieldPrepender;
@@ -45,13 +46,28 @@ public class ReplicationSender {
     public ReplicationSender(ReplicaManager replicaManager, EventLoopGroup injectedGroup) {
         this.replicaManager = Objects.requireNonNull(replicaManager, "replicaManager");
         this.eventLoopGroup = injectedGroup == null ? new NioEventLoopGroup(2) : injectedGroup;
-
         this.bootstrap = new Bootstrap()
                 .group(this.eventLoopGroup)
                 .channel(NioSocketChannel.class)
                 .option(ChannelOption.TCP_NODELAY, true)
                 .option(ChannelOption.SO_KEEPALIVE, true)
-                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 5000);
+                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 10000)
+                .handler(new ChannelInitializer<SocketChannel>() {
+                    @Override
+                    protected void initChannel(SocketChannel ch) {
+                        ChannelPipeline p = ch.pipeline();
+                        p.addLast(new LengthFieldPrepender(4));
+                        p.addLast(new LengthFieldBasedFrameDecoder(MAX_FRAME_LENGTH, 0, 4, 0, 4));
+                        p.addLast(new ReplicationMessageCodec());
+                        p.addLast(new ChannelInboundHandlerAdapter() {
+                            @Override
+                            public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+                                log.debug("Channel error: {}", cause.getMessage());
+                                ctx.close();
+                            }
+                        });
+                    }
+                });
     }
 
     public void replicate(NodeInfo master, ReplicationTask task) {
@@ -77,13 +93,48 @@ public class ReplicationSender {
     }
 
     private Channel getOrCreateChannel(NodeInfo replica) {
-        Channel existing = channels.get(replica.nodeId());
-        if (existing != null && existing.isActive()) return existing;
-        if (existing != null) {
-            channels.remove(replica.nodeId(), existing);
-            closeQuietly(existing);
+        String nodeId = replica.nodeId();
+        Channel existingChannel = channels.get(nodeId);
+        if (existingChannel != null && existingChannel.isActive()) return existingChannel;
+        channels.remove(nodeId);
+        try {
+            ChannelFuture future = bootstrap.connect(replica.host(), replica.replicationPort());
+            if (!future.await(1000)) {
+                log.warn("⏰ Timeout connecting to replica {}", replica);
+                return null;
+            }
+            if (!future.isSuccess()) {
+                log.warn("❌ Connection to {} failed: {}", replica, future.cause() != null ? future.cause().getMessage() : "unknown");
+                return null;
+            }
+            Channel newChannel = future.channel();
+            if (newChannel == null) {
+                log.warn("Channel is null for replica {}", replica);
+                return null;
+            }
+            newChannel.closeFuture().addListener(f -> {
+                log.info("Channel to {} closed, removing from pool", replica);
+                channels.remove(nodeId, newChannel);
+            });
+            Channel previous = channels.putIfAbsent(nodeId, newChannel);
+            if (previous != null && previous != newChannel) {
+                if (previous.isActive()) {
+                    newChannel.close();
+                    return previous;
+                } else {
+                    channels.replace(nodeId, previous, newChannel);
+                }
+            }
+            log.info("✅ Connected to replica: {}", replica);
+            return newChannel;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error("❌ Interrupted while connecting to {}", replica);
+            return null;
+        } catch (Exception e) {
+            log.error("❌ Failed to connect to {}: {}", replica, e.getMessage());
+            return null;
         }
-        return connectToReplica(replica);
     }
 
     private Channel connectToReplica(NodeInfo replica) {
@@ -115,7 +166,6 @@ public class ReplicationSender {
             });
 
             ChannelFuture connectFuture = child.connect(replica.host(), replica.replicationPort());
-
             connectFuture.addListener((ChannelFutureListener) future -> {
                 if (future.isSuccess()) {
                     Channel newChannel = future.channel();
@@ -128,11 +178,7 @@ public class ReplicationSender {
                 }
             });
 
-            if (connectFuture.await(1000, TimeUnit.MILLISECONDS)) {
-                if (connectFuture.isSuccess()) {
-                    return connectFuture.channel();
-                }
-            }
+            if (connectFuture.await(1000, TimeUnit.MILLISECONDS) && connectFuture.isSuccess()) return connectFuture.channel();
         } catch (Exception e) {
             log.warn("Exception connecting to replica {}: {}", replica.nodeId(), e.getMessage());
         }
@@ -157,8 +203,7 @@ public class ReplicationSender {
                 if (future.isSuccess()) {
                     log.trace("Successfully replicated to {}", replica.nodeId());
                 } else {
-                    log.warn("Write failed for replica {}: {}",
-                            replica.nodeId(), future.cause().getMessage());
+                    log.warn("Write failed for replica {}: {}", replica.nodeId(), future.cause().getMessage());
                     removeChannel(replica.nodeId(), future.channel());
                 }
             });
@@ -169,9 +214,7 @@ public class ReplicationSender {
     }
 
     private void removeChannel(String replicaId, Channel ch) {
-        if (channels.remove(replicaId, ch)) {
-            closeQuietly(ch);
-        }
+        if (channels.remove(replicaId, ch)) closeQuietly(ch);
     }
 
     private void closeQuietly(Channel ch) {

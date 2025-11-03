@@ -202,4 +202,21 @@ public class ReplicationReceiverTest {
         assertDoesNotThrow(() -> receiver.applyTask(task),
                 "Should not propagate store exceptions");
     }
+
+    @Test
+    @DisplayName("Should ignore out-of-order replication tasks")
+    void shouldIgnoreOutOfOrderTasks() {
+        ReplicationReceiver receiver = new ReplicationReceiver("127.0.0.1", 0, store, 1024, "node-A");
+        ReplicationTask task2 = new ReplicationTask("key", "value2", ReplicationTask.Operation.SET, System.currentTimeMillis(), "node-B", 2L);
+        ReplicationTask task1 = new ReplicationTask("key", "value1", ReplicationTask.Operation.SET, System.currentTimeMillis(), "node-B", 1L);
+        ReplicationTask task3 = new ReplicationTask("key", "value3", ReplicationTask.Operation.SET, System.currentTimeMillis(), "node-B", 3L);
+
+        receiver.applyTask(task2);
+        receiver.applyTask(task1);
+        receiver.applyTask(task3);
+
+        verify(store, times(1)).put("key", "value2");
+        verify(store, never()).put("key", "value1");
+        verify(store, times(1)).put("key", "value3");
+    }
 }

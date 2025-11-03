@@ -9,6 +9,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 
 /**
@@ -42,6 +43,7 @@ public class ReplicationManager {
     private final Function<String, NodeInfo> primaryResolver;
     private final ExecutorService replicationExecutor;
     private final int instanceId;
+    private final AtomicLong sequenceGenerator = new AtomicLong(0);
 
     /**
      * Creates a new ReplicationManager instance.
@@ -75,12 +77,6 @@ public class ReplicationManager {
         return Executors.newSingleThreadExecutor(factory);
     }
 
-    /**
-     * Determines if the current node is the master for the given key.
-     *
-     * @param key The cache key to check
-     * @return true if current node is master, false otherwise
-     */
     private boolean isMasterForKey(String key) {
         try {
             NodeInfo master = primaryResolver.apply(key);
@@ -98,37 +94,23 @@ public class ReplicationManager {
         }
     }
 
-    /**
-     * Handles local SET operation by triggering async replication if this node is master.
-     *
-     * @param key   The cache key being set
-     * @param value The value being set
-     * @throws NullPointerException if key or value is null
-     */
     public void onLocalSet(String key, String value) {
         Objects.requireNonNull(key, "key cannot be null");
         Objects.requireNonNull(value, "value cannot be null");
         if (!isMasterForKey(key)) return;
-        ReplicationTask task = ReplicationTask.ofSet(key, value, currentNode.nodeId());
+        long seq = sequenceGenerator.incrementAndGet();
+        ReplicationTask task = ReplicationTask.ofSet(key, value, currentNode.nodeId(), seq);
         submitReplicationTask(task, "SET");
     }
 
-    /**
-     * Handles local DELETE operation by triggering async replication if this node is master.
-     *
-     * @param key The cache key being deleted
-     * @throws NullPointerException if key is null
-     */
     public void onLocalDelete(String key) {
         Objects.requireNonNull(key, "key cannot be null");
         if (!isMasterForKey(key)) return;
-        ReplicationTask task = ReplicationTask.ofDelete(key, currentNode.nodeId());
+        long seq = sequenceGenerator.incrementAndGet();
+        ReplicationTask task = ReplicationTask.ofDelete(key, currentNode.nodeId(), seq);
         submitReplicationTask(task, "DELETE");
     }
 
-    /**
-     * Submits a replication task for async execution.
-     */
     private void submitReplicationTask(ReplicationTask task, String operationType) {
         replicationExecutor.submit(() -> {
             try {
@@ -147,12 +129,6 @@ public class ReplicationManager {
         });
     }
 
-    /**
-     * Processes an incoming replication task from another node.
-     * This method is synchronous and applies the task immediately.
-     *
-     * @param task The replication task to apply
-     */
     public void onReplicationReceived(ReplicationTask task) {
         if (task == null) {
             log.warn("Received null replication task, ignoring");
@@ -168,11 +144,6 @@ public class ReplicationManager {
         }
     }
 
-    /**
-     * Shuts down the ReplicationManager gracefully.
-     * Waits for pending replication tasks to complete up to the configured timeout.
-     * This method blocks until shutdown is complete or timeout is reached.
-     */
     public void shutdown() {
         log.info("Starting shutdown of ReplicationManager for node: {}", currentNode.nodeId());
         replicationExecutor.shutdown();

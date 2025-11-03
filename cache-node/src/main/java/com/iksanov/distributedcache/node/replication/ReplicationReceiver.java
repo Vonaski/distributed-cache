@@ -13,6 +13,8 @@ import org.slf4j.LoggerFactory;
 
 import java.net.InetSocketAddress;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -36,6 +38,7 @@ public final class ReplicationReceiver {
     private EventLoopGroup workerGroup;
     private Channel serverChannel;
     private volatile boolean running = false;
+    private final ConcurrentMap<String, Long> lastAppliedSequence = new ConcurrentHashMap<>();
 
     public ReplicationReceiver(String host, int port, CacheStore store) {
         this(host, port, store, DEFAULT_MAX_FRAME_LENGTH, null);
@@ -161,20 +164,31 @@ public final class ReplicationReceiver {
         if (task == null) return;
 
         if (nodeId != null && nodeId.equals(task.origin())) {
-            log.debug("Ignoring self-origin replication task for key={} from origin={}",
-                    task.key(), task.origin());
+            log.debug("Ignoring self-origin replication task for key={} from origin={}", task.key(), task.origin());
             return;
         }
 
         try {
+            if (task.sequence() > 0) {
+                Long lastSeq = lastAppliedSequence.get(task.key());
+                if (lastSeq != null && task.sequence() <= lastSeq) {
+                    log.debug("Ignoring outdated replication task: key={}, taskSeq={}, lastSeq={}", task.key(), task.sequence(), lastSeq);
+                    return;
+                }
+                lastAppliedSequence.put(task.key(), task.sequence());
+            }
+
             switch (task.operation()) {
                 case SET -> store.put(task.key(), task.value());
-                case DELETE -> store.delete(task.key());
+                case DELETE -> {
+                    store.delete(task.key());
+                    lastAppliedSequence.remove(task.key());
+                }
                 default -> log.warn("Unknown replication operation: {}", task.operation());
             }
+            if (log.isTraceEnabled()) log.trace("Applied replication task: key={}, operation={}, seq={}", task.key(), task.operation(), task.sequence());
         } catch (Exception e) {
-            log.error("Failed to apply replication task to store: key={}, operation={}, error={}",
-                    task.key(), task.operation(), e.getMessage(), e);
+            log.error("Failed to apply replication task to store: key={}, operation={}, error={}", task.key(), task.operation(), e.getMessage(), e);
         }
     }
 }

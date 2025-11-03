@@ -28,37 +28,6 @@ public class InMemoryCacheStore implements CacheStore {
     private final AtomicInteger putCounter = new AtomicInteger();
     private static final int LAZY_CLEANUP_INTERVAL = 100;
 
-    private static class CacheEntry {
-        final String key;
-        final String value;
-        final long expireAt;
-        final AtomicInteger accessCount;
-        volatile long lastAccessTime;
-
-        CacheEntry(String key, String value, long expireAt) {
-            this.key = key;
-            this.value = value;
-            this.expireAt = expireAt;
-            this.accessCount = new AtomicInteger(0);
-            this.lastAccessTime = System.currentTimeMillis();
-        }
-
-        boolean isExpired() {
-            return expireAt > 0 && System.currentTimeMillis() >= expireAt;
-        }
-
-        void recordAccess() {
-            accessCount.incrementAndGet();
-            lastAccessTime = System.currentTimeMillis();
-        }
-
-        int evictionScore() {
-            long ageSeconds = (System.currentTimeMillis() - lastAccessTime) / 1000;
-            int frequency = accessCount.get();
-            return (int)(ageSeconds * 2) - frequency;
-        }
-    }
-
     public InMemoryCacheStore(int maxSize, long defaultTtlMillis, long cleanupIntervalMillis) {
         if (maxSize <= 0) throw new CacheException("maxSize must be > 0");
         this.maxSize = maxSize;
@@ -94,22 +63,32 @@ public class InMemoryCacheStore implements CacheStore {
 
         long expireAt = defaultTtlMillis > 0 ? System.currentTimeMillis() + defaultTtlMillis : -1;
         CacheEntry newEntry = new CacheEntry(key, value, expireAt);
+        CacheEntry previous = store.put(key, newEntry);
 
-        evictionLock.lock();
-        try {
-            boolean isUpdate = store.containsKey(key);
-            store.put(key, newEntry);
-
-            if (!isUpdate && store.size() > maxSize) {
-                evictEntries();
+        if (previous == null) {
+            if (store.size() > maxSize) {
+                if (evictionLock.tryLock()) {
+                    try {
+                        if (store.size() > maxSize) evictEntries();
+                    } finally {
+                        evictionLock.unlock();
+                    }
+                }
             }
-        } finally {
-            evictionLock.unlock();
-        }
 
-        if (putCounter.incrementAndGet() % LAZY_CLEANUP_INTERVAL == 0) {
-            lazyCleanupExpired();
+            if (store.size() > (maxSize * 12 / 10)) {
+                evictionLock.lock();
+                try {
+                    if (store.size() > maxSize) {
+                        log.warn("Hard limit triggered: currentSize={}, maxSize={}, evicting aggressively", store.size(), maxSize);
+                        evictEntriesAggressively();
+                    }
+                } finally {
+                    evictionLock.unlock();
+                }
+            }
         }
+        if (putCounter.incrementAndGet() % LAZY_CLEANUP_INTERVAL == 0) lazyCleanupExpired();
     }
 
     @Override
@@ -144,6 +123,21 @@ public class InMemoryCacheStore implements CacheStore {
                 evictions.incrementAndGet();
             }
         }
+    }
+
+    private void evictEntriesAggressively() {
+        int currentOverflow = store.size() - maxSize;
+        int toEvict = Math.max(EVICTION_BATCH * 2, currentOverflow + EVICTION_BATCH);
+
+        int evicted = 0;
+        for (int i = 0; i < toEvict && store.size() > maxSize; i++) {
+            CacheEntry victim = findEvictionCandidate();
+            if (victim != null && store.remove(victim.key, victim)) {
+                evictions.incrementAndGet();
+                evicted++;
+            }
+        }
+        if (evicted > 0) log.info("Aggressive eviction completed: removed {} entries, size now {}/{}", evicted, store.size(), maxSize);
     }
 
     private CacheEntry findEvictionCandidate() {
