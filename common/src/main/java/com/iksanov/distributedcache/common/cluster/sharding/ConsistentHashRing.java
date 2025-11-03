@@ -6,13 +6,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 
 public class ConsistentHashRing {
 
     private static final Logger log = LoggerFactory.getLogger(ConsistentHashRing.class);
     private final ConcurrentSkipListMap<Integer, NodeInfo> ring = new ConcurrentSkipListMap<>();
-    private final Map<String, List<Integer>> nodeToHashes = new HashMap<>();
+    private final Map<String, List<Integer>> nodeToHashes = new ConcurrentHashMap<>();
     private final int virtualNodeCount;
 
     public ConsistentHashRing(int virtualNodeCount) {

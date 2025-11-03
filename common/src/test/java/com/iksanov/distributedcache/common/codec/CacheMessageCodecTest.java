@@ -2,6 +2,7 @@ package com.iksanov.distributedcache.common.codec;
 
 import com.iksanov.distributedcache.common.dto.CacheRequest;
 import com.iksanov.distributedcache.common.dto.CacheResponse;
+import com.iksanov.distributedcache.common.exception.SerializationException;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.CorruptedFrameException;
@@ -178,7 +179,7 @@ class CacheMessageCodecTest {
         bad.writeInt(-100);
 
         DecoderException ex = assertThrows(DecoderException.class, () -> channel.writeInbound(bad));
-        assertTrue(ex.getCause() instanceof com.iksanov.distributedcache.common.exception.SerializationException);
+        assertInstanceOf(SerializationException.class, ex.getCause());
         assertTrue(ex.getCause().getMessage().contains("Invalid string length"));
     }
 
