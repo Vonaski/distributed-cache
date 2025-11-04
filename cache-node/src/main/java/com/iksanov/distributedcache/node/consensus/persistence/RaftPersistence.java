@@ -1,4 +1,4 @@
-package com.iksanov.distributedcache.node.consensus;
+package com.iksanov.distributedcache.node.consensus.persistence;
 
 import java.io.IOException;
 

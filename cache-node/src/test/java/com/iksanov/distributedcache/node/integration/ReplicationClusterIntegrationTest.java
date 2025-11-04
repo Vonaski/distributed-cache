@@ -9,6 +9,8 @@ import com.iksanov.distributedcache.node.config.NetServerConfig;
 import com.iksanov.distributedcache.node.core.CacheStore;
 import com.iksanov.distributedcache.node.core.InMemoryCacheStore;
 import com.iksanov.distributedcache.node.metrics.CacheMetrics;
+import com.iksanov.distributedcache.node.metrics.RaftMetrics;
+import com.iksanov.distributedcache.node.metrics.ReplicationMetrics;
 import com.iksanov.distributedcache.node.net.NetServer;
 import com.iksanov.distributedcache.node.replication.ReplicationManager;
 import com.iksanov.distributedcache.node.replication.ReplicationReceiver;
@@ -64,7 +66,9 @@ class FullStackIntegrationTest {
     private NioEventLoopGroup clientEventLoopGroup;
     private Bootstrap clientBootstrap;
     private Map<String, CompletableFuture<CacheResponse>> pendingResponses;
-    private CacheMetrics metrics;
+    private CacheMetrics cacheMetrics;
+    private RaftMetrics raftMetrics;
+    private ReplicationMetrics replicationMetrics;
 
     @BeforeAll
     void setupCluster() throws Exception {
@@ -77,7 +81,9 @@ class FullStackIntegrationTest {
 
         stores = new ConcurrentHashMap<>();
         netServers = new ConcurrentHashMap<>();
-        metrics = new CacheMetrics();
+        cacheMetrics = new CacheMetrics();
+        raftMetrics = new RaftMetrics();
+        replicationMetrics = new ReplicationMetrics();
         replicationManagers = new ConcurrentHashMap<>();
         senders = new ConcurrentHashMap<>();
         receivers = new ConcurrentHashMap<>();
@@ -92,7 +98,7 @@ class FullStackIntegrationTest {
         for (NodeInfo node : allNodes) {
             System.out.println("  📦 Starting node: " + node.nodeId());
 
-            CacheStore store = new InMemoryCacheStore(10000, 0, 1000, metrics);
+            CacheStore store = new InMemoryCacheStore(10000, 0, 1000, cacheMetrics);
             stores.put(node.nodeId(), store);
 
             ReplicationReceiver receiver = new ReplicationReceiver(

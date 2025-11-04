@@ -8,6 +8,8 @@ import com.iksanov.distributedcache.node.config.ApplicationConfig.NodeRole;
 import com.iksanov.distributedcache.node.core.InMemoryCacheStore;
 import com.iksanov.distributedcache.node.metrics.CacheMetrics;
 import com.iksanov.distributedcache.node.metrics.MetricsServer;
+import com.iksanov.distributedcache.node.metrics.RaftMetrics;
+import com.iksanov.distributedcache.node.metrics.ReplicationMetrics;
 import com.iksanov.distributedcache.node.net.NetServer;
 import com.iksanov.distributedcache.node.replication.ReplicationManager;
 import com.iksanov.distributedcache.node.replication.ReplicationReceiver;
@@ -31,7 +33,9 @@ public class CacheNodeApplication {
     private ReplicationReceiver replicationReceiver;
     private ReplicationSender replicationSender;
     private final CountDownLatch shutdownLatch = new CountDownLatch(1);
-    private CacheMetrics metrics;
+    private CacheMetrics cacheMetrics;
+    private RaftMetrics raftMetrics;
+    private ReplicationMetrics replicationMetrics;
     private MetricsServer metricsServer;
 
     public CacheNodeApplication(ApplicationConfig config) {
@@ -53,13 +57,15 @@ public class CacheNodeApplication {
 
     public void start() {
         try {
-            metrics = new CacheMetrics();
+            cacheMetrics = new CacheMetrics();
+            raftMetrics = new RaftMetrics();
+            replicationMetrics = new ReplicationMetrics();
             log.info("✓ Metrics initialized");
 
-            cache = new InMemoryCacheStore(config.cacheMaxSize(), config.cacheTtlMillis(), 5000, metrics);
+            cache = new InMemoryCacheStore(config.cacheMaxSize(), config.cacheTtlMillis(), 5000, cacheMetrics);
             log.info("✓ Cache initialized (size={})", config.cacheMaxSize());
 
-            metricsServer = new MetricsServer(8081, metrics);
+            metricsServer = new MetricsServer(8081, cacheMetrics, raftMetrics, replicationMetrics);
             metricsServer.start();
             log.info("✓ Metrics server started on port 8081");
 

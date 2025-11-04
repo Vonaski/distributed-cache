@@ -1,6 +1,7 @@
 package com.iksanov.distributedcache.node.replication;
 
 import com.iksanov.distributedcache.common.cluster.NodeInfo;
+import com.iksanov.distributedcache.node.metrics.ReplicationMetrics;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -38,6 +39,7 @@ public class ReplicationManagerTest {
     private ReplicationSender sender;
     private ReplicationReceiver receiver;
     private Function<String, NodeInfo> primaryResolver;
+    private ReplicationMetrics replicationMetrics;
     private ReplicationManager manager;
 
     @BeforeEach
@@ -47,6 +49,7 @@ public class ReplicationManagerTest {
         sender = mock(ReplicationSender.class);
         receiver = mock(ReplicationReceiver.class);
         primaryResolver = mock(Function.class);
+        replicationMetrics = mock(ReplicationMetrics.class);
         manager = new ReplicationManager(currentNode, sender, receiver, primaryResolver);
     }
 

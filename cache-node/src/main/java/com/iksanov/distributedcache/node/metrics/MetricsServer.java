@@ -23,13 +23,17 @@ public class MetricsServer {
     
     private final int port;
     private final CacheMetrics metrics;
+    private final RaftMetrics raftMetrics;
+    private final ReplicationMetrics replicationMetrics;
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
     private Channel serverChannel;
 
-    public MetricsServer(int port, CacheMetrics metrics) {
+    public MetricsServer(int port, CacheMetrics metrics, RaftMetrics raftMetrics, ReplicationMetrics replicationMetrics) {
         this.port = port;
         this.metrics = metrics;
+        this.raftMetrics = raftMetrics;
+        this.replicationMetrics = replicationMetrics;
     }
 
     public void start() {
@@ -46,7 +50,7 @@ public class MetricsServer {
                             ch.pipeline()
                                     .addLast(new HttpServerCodec())
                                     .addLast(new HttpObjectAggregator(1024 * 1024))
-                                    .addLast(new MetricsHandler(metrics));
+                                    .addLast(new MetricsHandler(metrics, raftMetrics, replicationMetrics));
                         }
                     })
                     .option(ChannelOption.SO_BACKLOG, 128)
@@ -84,9 +88,13 @@ public class MetricsServer {
     private static class MetricsHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         
         private final CacheMetrics metrics;
+        private final RaftMetrics raftMetrics;
+        private final ReplicationMetrics replicationMetrics;
 
-        MetricsHandler(CacheMetrics metrics) {
+        MetricsHandler(CacheMetrics metrics,  RaftMetrics raftMetrics, ReplicationMetrics replicationMetrics) {
             this.metrics = metrics;
+            this.raftMetrics = raftMetrics;
+            this.replicationMetrics = replicationMetrics;
         }
 
         @Override
@@ -103,7 +111,7 @@ public class MetricsServer {
         }
 
         private void handleMetrics(ChannelHandlerContext ctx) {
-            String metricsData = metrics.scrape();
+            String metricsData = metrics.scrape() + "/n" +  raftMetrics.scrape() + "/n" + replicationMetrics.scrape();
             
             FullHttpResponse response = new DefaultFullHttpResponse(
                     HttpVersion.HTTP_1_1,

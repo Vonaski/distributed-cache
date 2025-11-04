@@ -1,6 +1,7 @@
 package com.iksanov.distributedcache.node.replication.stress;
 
 import com.iksanov.distributedcache.common.cluster.NodeInfo;
+import com.iksanov.distributedcache.node.metrics.ReplicationMetrics;
 import com.iksanov.distributedcache.node.replication.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -29,6 +30,7 @@ public class ReplicationManagerStressTest {
     private ReplicationReceiver receiver;
     private NodeInfo self;
     private Function<String, NodeInfo> primaryResolver;
+    private ReplicationMetrics replicationMetrics;
 
     @BeforeEach
     void setup() {
@@ -36,6 +38,7 @@ public class ReplicationManagerStressTest {
         sender = mock(ReplicationSender.class);
         receiver = mock(ReplicationReceiver.class);
         primaryResolver = key -> self;
+        replicationMetrics = mock(ReplicationMetrics.class);
         manager = new ReplicationManager(self, sender, receiver, primaryResolver);
     }
 

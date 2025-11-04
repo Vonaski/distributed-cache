@@ -45,15 +45,6 @@ public class ReplicationManager {
     private final int instanceId;
     private final AtomicLong sequenceGenerator = new AtomicLong(0);
 
-    /**
-     * Creates a new ReplicationManager instance.
-     *
-     * @param currentNode      Information about the current node
-     * @param sender          Component responsible for sending replication tasks
-     * @param receiver        Component responsible for receiving and applying replication tasks
-     * @param primaryResolver Function that determines the primary node for a given key
-     * @throws NullPointerException if any parameter is null
-     */
     public ReplicationManager(NodeInfo currentNode, ReplicationSender sender, ReplicationReceiver receiver, Function<String, NodeInfo> primaryResolver) {
         this.currentNode = Objects.requireNonNull(currentNode, "currentNode cannot be null");
         this.sender = Objects.requireNonNull(sender, "sender cannot be null");
