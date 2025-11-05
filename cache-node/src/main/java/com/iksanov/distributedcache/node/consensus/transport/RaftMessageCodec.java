@@ -28,55 +28,63 @@ public class RaftMessageCodec extends MessageToMessageCodec<ByteBuf, Object> {
     public static final byte TYPE_VOTE_RESP = 2;
     public static final byte TYPE_HEARTBEAT_REQ = 3;
     public static final byte TYPE_HEARTBEAT_RESP = 4;
+    private static final int MAX_STRING_LENGTH = 10_000;
+    private static final int MIN_HEADER_SIZE = 1 + 4 + 8; // type + idLen + term
+    private static final byte BOOLEAN_TRUE = 1;
+    private static final byte BOOLEAN_FALSE = 0;
 
     public record MessageEnvelope(String id, Object msg) {
     }
 
     @Override
     protected void encode(ChannelHandlerContext ctx, Object msg, List<Object> out) {
-        ByteBuf buf = ctx.alloc().buffer();
-        switch (msg) {
-            case CorrelatedVoteRequest cvr -> {
-                buf.writeByte(TYPE_VOTE_REQ);
-                writeString(buf, cvr.id);
-                buf.writeLong(cvr.request.term());
-                writeString(buf, cvr.request.candidateId());
+        ByteBuf buf = ctx.alloc().buffer(256, 4096);
+        try {
+            switch (msg) {
+                case CorrelatedVoteRequest cvr -> {
+                    buf.writeByte(TYPE_VOTE_REQ);
+                    writeString(buf, cvr.id);
+                    buf.writeLong(cvr.request.term());
+                    writeString(buf, cvr.request.candidateId());
+                }
+                case CorrelatedVoteResponse cvrsp -> {
+                    buf.writeByte(TYPE_VOTE_RESP);
+                    writeString(buf, cvrsp.id);
+                    buf.writeLong(cvrsp.response.term);
+                    buf.writeByte(cvrsp.response.voteGranted ? BOOLEAN_TRUE : BOOLEAN_FALSE);
+                }
+                case CorrelatedHeartbeatRequest chr -> {
+                    buf.writeByte(TYPE_HEARTBEAT_REQ);
+                    writeString(buf, chr.id);
+                    buf.writeLong(chr.request.term());
+                    writeString(buf, chr.request.leaderId());
+                }
+                case CorrelatedHeartbeatResponse chrsp -> {
+                    buf.writeByte(TYPE_HEARTBEAT_RESP);
+                    writeString(buf, chrsp.id);
+                    buf.writeLong(chrsp.response.term);
+                    buf.writeByte(chrsp.response.success ? BOOLEAN_TRUE : BOOLEAN_FALSE);
+                }
+                default -> {
+                    buf.release();
+                    throw new IllegalArgumentException("Unsupported outbound type: " + msg.getClass());
+                }
             }
-            case CorrelatedVoteResponse cvrsp -> {
-                buf.writeByte(TYPE_VOTE_RESP);
-                writeString(buf, cvrsp.id);
-                buf.writeLong(cvrsp.response.term);
-                buf.writeByte(cvrsp.response.voteGranted ? 1 : 0);
-            }
-            case CorrelatedHeartbeatRequest chr -> {
-                buf.writeByte(TYPE_HEARTBEAT_REQ);
-                writeString(buf, chr.id);
-                buf.writeLong(chr.request.term());
-                writeString(buf, chr.request.leaderId());
-            }
-            case CorrelatedHeartbeatResponse chrsp -> {
-                buf.writeByte(TYPE_HEARTBEAT_RESP);
-                writeString(buf, chrsp.id);
-                buf.writeLong(chrsp.response.term);
-                buf.writeByte(chrsp.response.success ? 1 : 0);
-            }
-            default -> {
-                buf.release();
-                throw new IllegalArgumentException("Unsupported outbound type: " + msg.getClass());
-            }
+            out.add(buf);
+        } catch (Exception e) {
+            buf.release();
+            throw e;
         }
-        out.add(buf);
     }
 
     @Override
     protected void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) {
-        if (in.readableBytes() < 1 + 4) {
-            throw new CorruptedFrameException("Frame too short");
-        }
+        if (in.readableBytes() < MIN_HEADER_SIZE) throw new CorruptedFrameException("Frame too short: " + in.readableBytes() + " bytes");
         byte type = in.readByte();
+        if (type < TYPE_VOTE_REQ || type > TYPE_HEARTBEAT_RESP) throw new CorruptedFrameException("Unknown message type: " + type);
         String id = readString(in);
+        if (in.readableBytes() < 8) throw new CorruptedFrameException("Not enough bytes for term field");
         long term = in.readLong();
-
         switch (type) {
             case TYPE_VOTE_REQ -> {
                 String candidate = readString(in);
@@ -84,7 +92,10 @@ public class RaftMessageCodec extends MessageToMessageCodec<ByteBuf, Object> {
                 out.add(new MessageEnvelope(id, vr));
             }
             case TYPE_VOTE_RESP -> {
-                boolean granted = in.readByte() == 1;
+                if (in.readableBytes() < 1) {
+                    throw new CorruptedFrameException("Not enough bytes for voteGranted field");
+                }
+                boolean granted = in.readByte() == BOOLEAN_TRUE;
                 VoteResponse vr = new VoteResponse();
                 vr.term = term;
                 vr.voteGranted = granted;
@@ -96,7 +107,10 @@ public class RaftMessageCodec extends MessageToMessageCodec<ByteBuf, Object> {
                 out.add(new MessageEnvelope(id, hr));
             }
             case TYPE_HEARTBEAT_RESP -> {
-                boolean success = in.readByte() == 1;
+                if (in.readableBytes() < 1) {
+                    throw new CorruptedFrameException("Not enough bytes for success field");
+                }
+                boolean success = in.readByte() == BOOLEAN_TRUE;
                 HeartbeatResponse hr = new HeartbeatResponse();
                 hr.term = term;
                 hr.success = success;
@@ -112,14 +126,19 @@ public class RaftMessageCodec extends MessageToMessageCodec<ByteBuf, Object> {
             return;
         }
         byte[] b = s.getBytes(StandardCharsets.UTF_8);
+        if (b.length > MAX_STRING_LENGTH) {
+            throw new IllegalArgumentException("String too long: " + b.length + " bytes");
+        }
         buf.writeInt(b.length);
         buf.writeBytes(b);
     }
 
     private static String readString(ByteBuf buf) {
+        if (buf.readableBytes() < 4) throw new CorruptedFrameException("Not enough bytes for string length");
         int len = buf.readInt();
         if (len < 0) return null;
-        if (len > 10_000) throw new CorruptedFrameException("String too long: " + len);
+        if (len > MAX_STRING_LENGTH) throw new CorruptedFrameException("String too long: " + len + " bytes");
+        if (buf.readableBytes() < len) throw new CorruptedFrameException("Not enough bytes for string content: expected " + len + ", available " + buf.readableBytes());
         byte[] b = new byte[len];
         buf.readBytes(b);
         return new String(b, StandardCharsets.UTF_8);

@@ -7,6 +7,7 @@ import com.iksanov.distributedcache.node.consensus.transport.NettyRaftTransport;
 import com.iksanov.distributedcache.node.metrics.RaftMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import java.io.IOException;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
@@ -14,17 +15,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
 
-
-/**
- * Represents a single node participating in the Raft consensus algorithm.
- * <p>
- * Handles leader election and heartbeat exchange.
- */
 public class RaftNode {
     private static final Logger log = LoggerFactory.getLogger(RaftNode.class);
-
     public enum NodeState {FOLLOWER, CANDIDATE, LEADER}
-
     private final String nodeId;
     private final List<String> peers;
     private final ReentrantLock stateLock = new ReentrantLock();
@@ -32,7 +25,6 @@ public class RaftNode {
     private volatile String currentLeader;
     private final AtomicLong currentTerm = new AtomicLong(0);
     private volatile String votedFor;
-    private volatile long lastHeartbeat = 0L;
     private final RaftConfig config;
     private final RaftPersistence persistence;
     private final RaftMetrics metrics;
@@ -60,14 +52,14 @@ public class RaftNode {
         restoreStateFromPersistence();
         initTransport(raftPort);
         startElectionTimer();
-        log.info("✅ RaftNode {} initialized with peers {} and transport port {}", nodeId, peers, raftPort);
+        log.info("[Raft] Node {} initialized with peers {} and transport port {}", nodeId, peers, raftPort);
     }
 
     private void initTransport(int raftPort) {
         try {
             transport = new NettyRaftTransport(raftPort, this, metrics);
             transport.startServer();
-            log.info("🚀 [Raft] Transport started on port {}", raftPort);
+            log.info("[Raft] Transport started on port {}", raftPort);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Failed to start Raft transport on port " + raftPort, e);
@@ -82,9 +74,9 @@ public class RaftNode {
             if (term > 0) currentTerm.set(term);
             String vf = persistence.loadVotedFor();
             if (vf != null && !vf.isBlank()) votedFor = vf;
-            log.info("🔁 [Raft] Node {} restored term={} votedFor={}", nodeId, currentTerm.get(), votedFor);
+            log.info("[Raft] Node {} restored term={} votedFor={}", nodeId, currentTerm.get(), votedFor);
         } catch (Exception e) {
-            log.warn("⚠️ [Raft] Failed to restore Raft state for {}: {}", nodeId, e.getMessage());
+            log.warn("[Raft] Failed to restore Raft state for {}: {}", nodeId, e.getMessage());
         }
     }
 
@@ -102,24 +94,30 @@ public class RaftNode {
 
     private void startElection() {
         if (runningFlag.get() == 0) return;
-
         stateLock.lock();
-        long newTerm;
+        long electionTerm;
         try {
             if (state == NodeState.LEADER) {
                 startElectionTimer();
                 return;
             }
-            newTerm = currentTerm.incrementAndGet();
-            persistence.saveTerm(newTerm);
+            long currentTermValue = currentTerm.get();
+            if (currentTermValue == Long.MAX_VALUE) {
+                log.error("[Raft] Node {} cannot increment term - already at MAX_VALUE", nodeId);
+                state = NodeState.FOLLOWER;
+                startElectionTimer();
+                return;
+            }
+            electionTerm = currentTerm.incrementAndGet();
+            persistence.saveTerm(electionTerm);
             state = NodeState.CANDIDATE;
             votedFor = nodeId;
             persistence.saveVotedFor(nodeId);
             currentLeader = null;
-            log.info("🗳️ [Raft] Node {} started election for term {}", nodeId, newTerm);
-            metrics.incrementElectionsStarted(newTerm);
+            log.info("[Raft] Node {} started election for term {}", nodeId, electionTerm);
+            metrics.incrementElectionsStarted(electionTerm);
         } catch (Exception e) {
-            log.error("💥 [Raft] Error starting election: {}", e.getMessage());
+            log.error("[Raft] Error starting election: {}", e.getMessage());
             return;
         } finally {
             stateLock.unlock();
@@ -128,39 +126,56 @@ public class RaftNode {
         AtomicInteger votes = new AtomicInteger(1);
         int votesNeeded = (peers.size() + 1) / 2 + 1;
 
+        if (peers.isEmpty()) {
+            becomeLeader(electionTerm);
+            return;
+        }
+
         for (String peer : peers) {
-            transport.requestVote(peer, new VoteRequest(newTerm, nodeId),
+            transport.requestVote(peer, new VoteRequest(electionTerm, nodeId),
                             Duration.ofMillis(config.voteWaitTimeoutMs()))
                     .whenCompleteAsync((resp, ex) -> {
                         if (ex != null) {
-                            log.debug("⚠️ [Raft] Vote request to {} failed: {}", peer, ex.getMessage());
+                            log.debug("[Raft] Vote request to {} failed: {}", peer, ex.getMessage());
                             return;
                         }
-                        if (resp.term > newTerm) {
-                            stepDown(resp.term);
-                        } else if (resp.voteGranted) {
-                            metrics.incrementVoteGranted();
-                            int v = votes.incrementAndGet();
-                            log.debug("📨 [Raft] Node {} got vote from {} ({}/{})", nodeId, peer, v, votesNeeded);
-                            if (v >= votesNeeded) {
-                                becomeLeader();
+
+                        if (currentTerm.get() != electionTerm) {
+                            log.debug("[Raft] Ignoring stale vote response (term changed)");
+                            return;
+                        }
+
+                        if (resp.term > electionTerm) {
+                            try {
+                                stepDown(resp.term);
+                            } catch (Exception e) {
+                                log.error("[Raft] Error in stepDown: {}", e.getMessage());
                             }
-                        } else {
-                            metrics.incrementVoteDenied();
+                        } else if (resp.term == electionTerm && resp.voteGranted) {
+                            int v = votes.incrementAndGet();
+                            log.debug("[Raft] Node {} got vote from {} ({}/{})", nodeId, peer, v, votesNeeded);
+                            if (v >= votesNeeded) {
+                                if (votes.compareAndSet(votesNeeded, votesNeeded + 1000)) {
+                                    becomeLeader(electionTerm);
+                                }
+                            }
                         }
                     }, transportExecutor);
         }
     }
 
-    private void becomeLeader() {
+    private void becomeLeader(long electionTerm) {
         stateLock.lock();
         try {
-            if (state != NodeState.CANDIDATE) return;
+            if (state != NodeState.CANDIDATE || currentTerm.get() != electionTerm) {
+                log.debug("[Raft] Cannot become leader: state={}, term changed", state);
+                return;
+            }
             state = NodeState.LEADER;
             currentLeader = nodeId;
             if (electionTimerFuture != null) electionTimerFuture.cancel(false);
             metrics.incrementLeadersElected(currentTerm.get());
-            log.info("👑 [Raft] Node {} became LEADER for term {}", nodeId, currentTerm.get());
+            log.info("[Raft] Node {} became LEADER for term {}", nodeId, currentTerm.get());
             startHeartbeatTimer();
             listeners.forEach(l -> safeCall(() -> l.onBecomeLeader()));
         } finally {
@@ -168,26 +183,24 @@ public class RaftNode {
         }
     }
 
-    private void stepDown(long newTerm) {
+    private void stepDown(long newTerm) throws IOException {
         stateLock.lock();
         try {
             if (newTerm <= currentTerm.get()) return;
             currentTerm.set(newTerm);
-            persistence.saveTerm(newTerm);
             NodeState prev = state;
             state = NodeState.FOLLOWER;
             votedFor = null;
-            persistence.saveVotedFor(nodeId);
-            log.warn("⚠️ [Raft] Node {} stepping down to FOLLOWER (new term {})", nodeId, newTerm);
+            currentLeader = null;
+            persistence.saveTerm(newTerm);
+            persistence.saveVotedFor(null);
+            log.warn("[Raft] Node {} stepping down to FOLLOWER (new term {})", nodeId, newTerm);
             if (prev == NodeState.LEADER) {
                 metrics.incrementStepDowns(newTerm);
                 listeners.forEach(l -> safeCall(() -> l.onLoseLeadership()));
             }
-            currentLeader = null;
             if (heartbeatTimerFuture != null) heartbeatTimerFuture.cancel(false);
             startElectionTimer();
-        } catch (Exception e) {
-            log.error("💥 [Raft] Error during stepDown: {}", e.getMessage());
         } finally {
             stateLock.unlock();
         }
@@ -197,7 +210,7 @@ public class RaftNode {
         if (heartbeatTimerFuture != null && !heartbeatTimerFuture.isDone()) heartbeatTimerFuture.cancel(false);
         heartbeatTimerFuture = scheduler.scheduleAtFixedRate(() -> {
             if (state != NodeState.LEADER || runningFlag.get() == 0) return;
-            log.trace("💓 [Raft] Node {} sending heartbeats to {} peers", nodeId, peers.size());
+            log.trace("[Raft] Node {} sending heartbeats to {} peers", nodeId, peers.size());
             metrics.incrementHeartbeatsSent();
             for (String peer : peers) {
                 transport.sendHeartbeat(peer,
@@ -205,10 +218,16 @@ public class RaftNode {
                                 Duration.ofMillis(config.heartbeatIntervalMs()))
                         .whenCompleteAsync((resp, ex) -> {
                             if (ex != null) {
-                                log.trace("⚠️ [Raft] Heartbeat to {} failed: {}", peer, ex.getMessage());
+                                log.trace("[Raft] Heartbeat to {} failed: {}", peer, ex.getMessage());
                                 return;
                             }
-                            if (resp.term > currentTerm.get()) stepDown(resp.term);
+                            if (resp.term > currentTerm.get()) {
+                                try {
+                                    stepDown(resp.term);
+                                } catch (Exception e) {
+                                    log.error("[Raft] Error in stepDown: {}", e.getMessage());
+                                }
+                            }
                             metrics.incrementHeartbeatsReceived();
                         }, transportExecutor);
             }
@@ -219,25 +238,32 @@ public class RaftNode {
         stateLock.lock();
         try {
             VoteResponse resp = new VoteResponse();
-            resp.term = currentTerm.get();
-            if (req.term() < currentTerm.get()) return resp;
+            if (req.term() < currentTerm.get()) {
+                resp.term = currentTerm.get();
+                resp.voteGranted = false;
+                return resp;
+            }
             if (req.term() > currentTerm.get()) stepDown(req.term());
+            resp.term = currentTerm.get();
             if (votedFor == null || votedFor.equals(req.candidateId())) {
                 votedFor = req.candidateId();
                 persistence.saveVotedFor(votedFor);
                 startElectionTimer();
                 resp.voteGranted = true;
-                log.debug("🗳️ [Raft] Node {} grants vote to {} for term {}", nodeId, req.candidateId(), req.term());
+                log.debug("[Raft] Node {} grants vote to {} for term {}", nodeId, req.candidateId(), req.term());
                 metrics.incrementVoteGranted();
             } else {
-                log.debug("🚫 [Raft] Node {} denies vote to {} (already voted for {})", nodeId, req.candidateId(), votedFor);
+                log.debug("[Raft] Node {} denies vote to {} (already voted for {})", nodeId, req.candidateId(), votedFor);
                 resp.voteGranted = false;
                 metrics.incrementVoteDenied();
             }
             return resp;
         } catch (Exception e) {
-            log.error("💥 [Raft] Error handling VoteRequest: {}", e.getMessage());
-            throw new RuntimeException(e);
+            log.error("[Raft] Error handling VoteRequest: {}", e.getMessage(), e);
+            VoteResponse resp = new VoteResponse();
+            resp.term = currentTerm.get();
+            resp.voteGranted = false;
+            return resp;
         } finally {
             stateLock.unlock();
         }
@@ -248,18 +274,26 @@ public class RaftNode {
         try {
             HeartbeatResponse resp = new HeartbeatResponse();
             resp.term = currentTerm.get();
-            if (req.term() < currentTerm.get()) return resp;
-            if (req.term() > currentTerm.get()) stepDown(req.term());
+            if (req.term() < currentTerm.get()) {
+                resp.success = false;
+                return resp;
+            }
+            if (req.term() > currentTerm.get()) {
+                stepDown(req.term());
+                resp.term = currentTerm.get();
+            }
             currentLeader = req.leaderId();
-            lastHeartbeat = System.currentTimeMillis();
             resp.success = true;
-            log.trace("💓 [Raft] Node {} received heartbeat from leader {} (term={})", nodeId, req.leaderId(), req.term());
+            log.trace("[Raft] Node {} received heartbeat from leader {} (term={})", nodeId, req.leaderId(), req.term());
             metrics.incrementHeartbeatsReceived();
             startElectionTimer();
             return resp;
         } catch (Exception e) {
-            log.error("💥 [Raft] Error handling Heartbeat: {}", e.getMessage());
-            throw new RuntimeException(e);
+            log.error("[Raft] Error handling Heartbeat: {}", e.getMessage(), e);
+            HeartbeatResponse resp = new HeartbeatResponse();
+            resp.term = currentTerm.get();
+            resp.success = false;
+            return resp;
         } finally {
             stateLock.unlock();
         }
@@ -268,18 +302,53 @@ public class RaftNode {
     private void safeCall(Runnable r) {
         try {
             r.run();
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            log.warn("[Raft] Error in listener callback: {}", e.getMessage());
         }
+    }
+
+    public void addLeaderChangeListener(LeaderChangeListener listener) {
+        listeners.add(listener);
+    }
+
+    public NodeState getState() {
+        return state;
+    }
+
+    public long getCurrentTerm() {
+        return currentTerm.get();
+    }
+
+    public String getCurrentLeader() {
+        return currentLeader;
+    }
+
+    public String getNodeId() {
+        return nodeId;
     }
 
     public void shutdown() {
         if (!runningFlag.compareAndSet(1, 0)) return;
-        log.info("🧩 [Raft] Node {} shutting down", nodeId);
-        if (electionTimerFuture != null) electionTimerFuture.cancel(true);
-        if (heartbeatTimerFuture != null) heartbeatTimerFuture.cancel(true);
-        scheduler.shutdownNow();
-        transportExecutor.shutdownNow();
-        if (transport != null) transport.shutdown();
-        log.info("✅ [Raft] Node {} shutdown complete", nodeId);
+        log.info("[Raft] Node {} shutting down", nodeId);
+        try {
+            if (electionTimerFuture != null) electionTimerFuture.cancel(true);
+            if (heartbeatTimerFuture != null) heartbeatTimerFuture.cancel(true);
+            scheduler.shutdownNow();
+            scheduler.awaitTermination(1, TimeUnit.SECONDS);
+            transportExecutor.shutdownNow();
+            transportExecutor.awaitTermination(1, TimeUnit.SECONDS);
+            if (transport != null) {
+                try {
+                    transport.shutdown();
+                } catch (Exception e) {
+                    log.warn("[Raft] Transport shutdown failed: {}", e.getMessage());
+                }
+            }
+            metrics.incrementStepDowns(currentTerm.get());
+            log.info("[Raft] Node {} shutdown complete", nodeId);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("[Raft] Interrupted during shutdown");
+        }
     }
 }
