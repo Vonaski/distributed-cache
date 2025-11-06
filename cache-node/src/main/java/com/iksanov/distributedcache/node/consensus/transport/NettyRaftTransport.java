@@ -33,7 +33,6 @@ public class NettyRaftTransport {
     private static final Logger log = LoggerFactory.getLogger(NettyRaftTransport.class);
     private static final int MAX_FRAME_LENGTH = 64 * 1024;
     private static final int MAX_PENDING_REQUESTS = 1000;
-    private final RaftMessageCodec codec = new RaftMessageCodec();
     private final RaftNode raftNode;
     private final RaftMetrics metrics;
     private final int serverPort;
@@ -67,7 +66,7 @@ public class NettyRaftTransport {
                         ChannelPipeline p = ch.pipeline();
                         p.addLast(new LengthFieldBasedFrameDecoder(MAX_FRAME_LENGTH, 0, 4, 0, 4));
                         p.addLast(new LengthFieldPrepender(4));
-                        p.addLast(codec);
+                        p.addLast(new RaftMessageCodec());
                         p.addLast(new ServerHandler());
                     }
                 });
@@ -223,7 +222,7 @@ public class NettyRaftTransport {
                         ChannelPipeline p = ch.pipeline();
                         p.addLast(new LengthFieldPrepender(4));
                         p.addLast(new LengthFieldBasedFrameDecoder(MAX_FRAME_LENGTH, 0, 4, 0, 4));
-                        p.addLast(codec);
+                        p.addLast(new RaftMessageCodec());
                         p.addLast(new ClientHandler());
                     }
                 });

@@ -7,6 +7,7 @@ import com.iksanov.distributedcache.node.consensus.transport.NettyRaftTransport;
 import com.iksanov.distributedcache.node.metrics.RaftMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.time.Duration;
 import java.util.*;
@@ -20,6 +21,7 @@ public class RaftNode {
     public enum NodeState {FOLLOWER, CANDIDATE, LEADER}
     private final String nodeId;
     private final List<String> peers;
+    private final Map<String, String> peerAddresses;
     private final ReentrantLock stateLock = new ReentrantLock();
     private volatile NodeState state = NodeState.FOLLOWER;
     private volatile String currentLeader;
@@ -42,8 +44,19 @@ public class RaftNode {
                     RaftPersistence persistence,
                     RaftMetrics metrics,
                     int raftPort) {
+        this(nodeId, allNodes, buildDefaultAddresses(allNodes), config, persistence, metrics, raftPort);
+    }
+
+    public RaftNode(String nodeId,
+                    List<String> allNodes,
+                    Map<String, String> peerAddresses,
+                    RaftConfig config,
+                    RaftPersistence persistence,
+                    RaftMetrics metrics,
+                    int raftPort) {
         this.nodeId = Objects.requireNonNull(nodeId);
         this.peers = allNodes.stream().filter(n -> !n.equals(nodeId)).toList();
+        this.peerAddresses = peerAddresses != null ? peerAddresses : buildDefaultAddresses(allNodes);
         this.config = (config != null) ? config : RaftConfig.defaults();
         this.persistence = (persistence != null) ? persistence : RaftPersistence.noop();
         this.metrics = (metrics != null) ? metrics : new RaftMetrics();
@@ -53,6 +66,14 @@ public class RaftNode {
         initTransport(raftPort);
         startElectionTimer();
         log.info("[Raft] Node {} initialized with peers {} and transport port {}", nodeId, peers, raftPort);
+    }
+
+    private static Map<String, String> buildDefaultAddresses(List<String> allNodes) {
+        Map<String, String> addresses = new HashMap<>();
+        for (String nodeId : allNodes) {
+            addresses.put(nodeId, nodeId);
+        }
+        return addresses;
     }
 
     private void initTransport(int raftPort) {
@@ -132,7 +153,8 @@ public class RaftNode {
         }
 
         for (String peer : peers) {
-            transport.requestVote(peer, new VoteRequest(electionTerm, nodeId),
+            String peerAddress = peerAddresses.getOrDefault(peer, peer);
+            transport.requestVote(peerAddress, new VoteRequest(electionTerm, nodeId),
                             Duration.ofMillis(config.voteWaitTimeoutMs()))
                     .whenCompleteAsync((resp, ex) -> {
                         if (ex != null) {
@@ -155,9 +177,7 @@ public class RaftNode {
                             int v = votes.incrementAndGet();
                             log.debug("[Raft] Node {} got vote from {} ({}/{})", nodeId, peer, v, votesNeeded);
                             if (v >= votesNeeded) {
-                                if (votes.compareAndSet(votesNeeded, votesNeeded + 1000)) {
-                                    becomeLeader(electionTerm);
-                                }
+                                becomeLeader(electionTerm);
                             }
                         }
                     }, transportExecutor);
@@ -213,7 +233,8 @@ public class RaftNode {
             log.trace("[Raft] Node {} sending heartbeats to {} peers", nodeId, peers.size());
             metrics.incrementHeartbeatsSent();
             for (String peer : peers) {
-                transport.sendHeartbeat(peer,
+                String peerAddress = peerAddresses.getOrDefault(peer, peer);
+                transport.sendHeartbeat(peerAddress,
                                 new HeartbeatRequest(currentTerm.get(), nodeId),
                                 Duration.ofMillis(config.heartbeatIntervalMs()))
                         .whenCompleteAsync((resp, ex) -> {
@@ -238,6 +259,13 @@ public class RaftNode {
         stateLock.lock();
         try {
             VoteResponse resp = new VoteResponse();
+            if (!peers.contains(req.candidateId()) && !req.candidateId().equals(nodeId)) {
+                log.debug("[Raft] Node {} denies vote to UNKNOWN candidate {}", nodeId, req.candidateId());
+                resp.term = currentTerm.get();
+                resp.voteGranted = false;
+                metrics.incrementVoteDenied();
+                return resp;
+            }
             if (req.term() < currentTerm.get()) {
                 resp.term = currentTerm.get();
                 resp.voteGranted = false;
@@ -274,6 +302,11 @@ public class RaftNode {
         try {
             HeartbeatResponse resp = new HeartbeatResponse();
             resp.term = currentTerm.get();
+            if (!peers.contains(req.leaderId()) && !req.leaderId().equals(nodeId)) {
+                log.debug("[Raft] Node {} ignores heartbeat from UNKNOWN leader {}", nodeId, req.leaderId());
+                resp.success = false;
+                return resp;
+            }
             if (req.term() < currentTerm.get()) {
                 resp.success = false;
                 return resp;

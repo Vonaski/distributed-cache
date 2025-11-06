@@ -68,23 +68,6 @@ public class ReplicationManager {
         return Executors.newSingleThreadExecutor(factory);
     }
 
-    private boolean isMasterForKey(String key) {
-        try {
-            NodeInfo master = primaryResolver.apply(key);
-            if (master == null) {
-                log.warn("Primary resolver returned null for key={}, skipping replication", key);
-                return false;
-            }
-
-            boolean isMaster = currentNode.equals(master);
-            if (!isMaster) log.trace("Node {} is not master for key={} (master={})", currentNode.nodeId(), key, master.nodeId());
-            return isMaster;
-        } catch (Exception e) {
-            log.error("Error determining master for key={}: {}", key, e.getMessage(), e);
-            return false;
-        }
-    }
-
     public void onLocalSet(String key, String value) {
         Objects.requireNonNull(key, "key cannot be null");
         Objects.requireNonNull(value, "value cannot be null");
@@ -100,6 +83,22 @@ public class ReplicationManager {
         long seq = sequenceGenerator.incrementAndGet();
         ReplicationTask task = ReplicationTask.ofDelete(key, currentNode.nodeId(), seq);
         submitReplicationTask(task, "DELETE");
+    }
+
+    private boolean isMasterForKey(String key) {
+        try {
+            NodeInfo master = primaryResolver.apply(key);
+            if (master == null) {
+                log.warn("Primary resolver returned null for key={}, skipping replication", key);
+                return false;
+            }
+            boolean isMaster = currentNode.equals(master);
+            if (!isMaster) log.trace("Node {} is not master for key={} (master={})", currentNode.nodeId(), key, master.nodeId());
+            return isMaster;
+        } catch (Exception e) {
+            log.error("Error determining master for key={}: {}", key, e.getMessage(), e);
+            return false;
+        }
     }
 
     private void submitReplicationTask(ReplicationTask task, String operationType) {
