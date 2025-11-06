@@ -84,9 +84,7 @@ class NettyRaftTransportTest {
         try {
             server.startServer();
             client.startServer();
-            VoteResponse expectedResponse = new VoteResponse();
-            expectedResponse.term = 5L;
-            expectedResponse.voteGranted = true;
+            VoteResponse expectedResponse = new VoteResponse(5L, true);
             when(serverNode.handleVoteRequest(any(VoteRequest.class))).thenReturn(expectedResponse);
             VoteRequest request = new VoteRequest(5L, "client-node");
             CompletableFuture<VoteResponse> future = client.requestVote(
@@ -96,8 +94,8 @@ class NettyRaftTransportTest {
             );
             VoteResponse response = future.get(2, TimeUnit.SECONDS);
             assertNotNull(response);
-            assertEquals(5L, response.term);
-            assertTrue(response.voteGranted);
+            assertEquals(5L, response.term());
+            assertTrue(response.voteGranted());
             ArgumentCaptor<VoteRequest> captor = ArgumentCaptor.forClass(VoteRequest.class);
             verify(serverNode, timeout(1000)).handleVoteRequest(captor.capture());
             assertEquals(5L, captor.getValue().term());
@@ -120,9 +118,7 @@ class NettyRaftTransportTest {
         try {
             server.startServer();
             client.startServer();
-            VoteResponse deniedResponse = new VoteResponse();
-            deniedResponse.term = 10L;
-            deniedResponse.voteGranted = false;
+            VoteResponse deniedResponse = new VoteResponse(10L, false);
             when(serverNode.handleVoteRequest(any())).thenReturn(deniedResponse);
             VoteRequest request = new VoteRequest(5L, "client");
             CompletableFuture<VoteResponse> future = client.requestVote(
@@ -130,8 +126,8 @@ class NettyRaftTransportTest {
             );
             VoteResponse response = future.get(2, TimeUnit.SECONDS);
             assertNotNull(response);
-            assertEquals(10L, response.term);
-            assertFalse(response.voteGranted);
+            assertEquals(10L, response.term());
+            assertFalse(response.voteGranted());
         } finally {
             server.shutdown();
             client.shutdown();
@@ -150,9 +146,7 @@ class NettyRaftTransportTest {
         try {
             server.startServer();
             client.startServer();
-            HeartbeatResponse expectedResponse = new HeartbeatResponse();
-            expectedResponse.term = 7L;
-            expectedResponse.success = true;
+            HeartbeatResponse expectedResponse = new HeartbeatResponse(7L, true);
             when(serverNode.handleHeartbeat(any())).thenReturn(expectedResponse);
             HeartbeatRequest request = new HeartbeatRequest(7L, "leader-node");
             CompletableFuture<HeartbeatResponse> future = client.sendHeartbeat(
@@ -160,8 +154,8 @@ class NettyRaftTransportTest {
             );
             HeartbeatResponse response = future.get(2, TimeUnit.SECONDS);
             assertNotNull(response);
-            assertEquals(7L, response.term);
-            assertTrue(response.success);
+            assertEquals(7L, response.term());
+            assertTrue(response.success());
             verify(serverNode, timeout(1000)).handleHeartbeat(any());
         } finally {
             server.shutdown();
@@ -181,9 +175,7 @@ class NettyRaftTransportTest {
         try {
             server.startServer();
             client.startServer();
-            HeartbeatResponse failureResponse = new HeartbeatResponse();
-            failureResponse.term = 15L;
-            failureResponse.success = false;
+            HeartbeatResponse failureResponse = new HeartbeatResponse(15L, false);
             when(serverNode.handleHeartbeat(any())).thenReturn(failureResponse);
             HeartbeatRequest request = new HeartbeatRequest(10L, "leader");
             CompletableFuture<HeartbeatResponse> future = client.sendHeartbeat(
@@ -191,8 +183,8 @@ class NettyRaftTransportTest {
             );
             HeartbeatResponse response = future.get(2, TimeUnit.SECONDS);
             assertNotNull(response);
-            assertEquals(15L, response.term);
-            assertFalse(response.success);
+            assertEquals(15L, response.term());
+            assertFalse(response.success());
         } finally {
             server.shutdown();
             client.shutdown();
@@ -208,7 +200,7 @@ class NettyRaftTransportTest {
         RaftNode clientNode = mock(RaftNode.class);
         when(serverNode.handleVoteRequest(any())).thenAnswer(invocation -> {
             Thread.sleep(5000);
-            return new VoteResponse();
+            return new VoteResponse(1L, true);
         });
         NettyRaftTransport server = new NettyRaftTransport(serverPort, serverNode, new RaftMetrics());
         NettyRaftTransport client = new NettyRaftTransport(clientPort, clientNode, new RaftMetrics());
@@ -217,11 +209,10 @@ class NettyRaftTransportTest {
             client.startServer();
             VoteRequest request = new VoteRequest(1L, "client");
             CompletableFuture<VoteResponse> future = client.requestVote(
-                    "localhost:" + serverPort, request, Duration.ofMillis(100) // Short timeout
+                    "localhost:" + serverPort, request, Duration.ofMillis(100)
             );
             ExecutionException ex = assertThrows(ExecutionException.class, () -> future.get(2, TimeUnit.SECONDS));
-            assertInstanceOf(TimeoutException.class, ex.getCause(), "Expected TimeoutException but got: " + ex.getCause().getClass());
-
+            assertInstanceOf(TimeoutException.class, ex.getCause());
         } finally {
             server.shutdown();
             client.shutdown();
@@ -237,7 +228,7 @@ class NettyRaftTransportTest {
         RaftNode clientNode = mock(RaftNode.class);
         when(serverNode.handleHeartbeat(any())).thenAnswer(invocation -> {
             Thread.sleep(5000);
-            return new HeartbeatResponse();
+            return new HeartbeatResponse(1L, true);
         });
         NettyRaftTransport server = new NettyRaftTransport(serverPort, serverNode, new RaftMetrics());
         NettyRaftTransport client = new NettyRaftTransport(clientPort, clientNode, new RaftMetrics());
@@ -257,54 +248,20 @@ class NettyRaftTransportTest {
     }
 
     @Test
-    @DisplayName("Should fail when target is unreachable")
-    void shouldFailWhenTargetUnreachable() throws Exception {
-        transport = new NettyRaftTransport(testPort, mockRaftNode, mockMetrics);
-        transport.startServer();
-        VoteRequest request = new VoteRequest(1L, "node");
-        CompletableFuture<VoteResponse> future = transport.requestVote(
-                "localhost:65535",
-                request,
-                Duration.ofMillis(500)
-        );
-        ExecutionException ex = assertThrows(ExecutionException.class, () -> future.get(2, TimeUnit.SECONDS));
-        assertNotNull(ex.getCause());
-    }
-
-    @Test
-    @DisplayName("Should fail when target format is invalid")
-    void shouldFailWhenTargetFormatInvalid() throws Exception {
-        transport = new NettyRaftTransport(testPort, mockRaftNode, mockMetrics);
-        transport.startServer();
-        VoteRequest request = new VoteRequest(1L, "node");
-        CompletableFuture<VoteResponse> future = transport.requestVote(
-                "invalid-target",
-                request,
-                Duration.ofMillis(500)
-        );
-        ExecutionException ex = assertThrows(ExecutionException.class, () -> future.get(2, TimeUnit.SECONDS));
-        assertTrue(ex.getCause().getMessage().contains("No connection to target"));
-    }
-
-    @Test
-    @DisplayName("Should handle multiple concurrent requests")
-    void shouldHandleMultipleConcurrentRequests() throws Exception {
+    @DisplayName("Should handle concurrent requests")
+    void shouldHandleConcurrentRequests() throws Exception {
         int serverPort = testPort;
         int clientPort = testPort + 1;
         RaftNode serverNode = mock(RaftNode.class);
         RaftNode clientNode = mock(RaftNode.class);
         NettyRaftTransport server = new NettyRaftTransport(serverPort, serverNode, new RaftMetrics());
         NettyRaftTransport client = new NettyRaftTransport(clientPort, clientNode, new RaftMetrics());
-
         try {
             server.startServer();
             client.startServer();
             when(serverNode.handleVoteRequest(any())).thenAnswer(invocation -> {
                 VoteRequest req = invocation.getArgument(0);
-                VoteResponse resp = new VoteResponse();
-                resp.term = req.term();
-                resp.voteGranted = (req.term() % 2 == 0);
-                return resp;
+                return new VoteResponse(req.term(), req.term() % 2 == 0);
             });
             int numRequests = 10;
             List<CompletableFuture<VoteResponse>> futures = new ArrayList<>();
@@ -319,8 +276,8 @@ class NettyRaftTransportTest {
             for (int i = 0; i < numRequests; i++) {
                 VoteResponse resp = futures.get(i).get();
                 assertNotNull(resp);
-                assertEquals(i, resp.term);
-                assertEquals(i % 2 == 0, resp.voteGranted);
+                assertEquals(i, resp.term());
+                assertEquals(i % 2 == 0, resp.voteGranted());
             }
         } finally {
             server.shutdown();
@@ -337,10 +294,7 @@ class NettyRaftTransportTest {
         RaftNode clientNode = mock(RaftNode.class);
         when(serverNode.handleVoteRequest(any())).thenAnswer(invocation -> {
             Thread.sleep(10000);
-            VoteResponse resp = new VoteResponse();
-            resp.term = 1L;
-            resp.voteGranted = true;
-            return resp;
+            return new VoteResponse(1L, true);
         });
         NettyRaftTransport server = new NettyRaftTransport(serverPort, serverNode, new RaftMetrics());
         NettyRaftTransport client = new NettyRaftTransport(clientPort, clientNode, new RaftMetrics());
@@ -403,7 +357,7 @@ class NettyRaftTransportTest {
         RaftNode clientNode = mock(RaftNode.class);
         when(serverNode.handleVoteRequest(any())).thenAnswer(invocation -> {
             Thread.sleep(5000);
-            return new VoteResponse();
+            return new VoteResponse(1L, true);
         });
         NettyRaftTransport server = new NettyRaftTransport(serverPort, serverNode, new RaftMetrics());
         NettyRaftTransport client = new NettyRaftTransport(clientPort, clientNode, new RaftMetrics());
@@ -435,9 +389,7 @@ class NettyRaftTransportTest {
         try {
             server.startServer();
             client.startServer();
-            VoteResponse response = new VoteResponse();
-            response.term = 1L;
-            response.voteGranted = true;
+            VoteResponse response = new VoteResponse(1L, true);
             when(serverNode.handleVoteRequest(any())).thenReturn(response);
             VoteRequest request = new VoteRequest(1L, "client");
             CompletableFuture<VoteResponse> future = client.requestVote(

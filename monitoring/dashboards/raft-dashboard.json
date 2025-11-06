@@ -1,0 +1,229 @@
+{
+  "dashboard": {
+    "title": "Raft Consensus Monitoring",
+    "tags": ["raft", "consensus", "distributed"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Cluster Health",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "count(raft_node_state == 2)",
+            "legendFormat": "Active Leaders"
+          }
+        ],
+        "options": {
+          "colorMode": "background",
+          "graphMode": "none",
+          "thresholds": [
+            {"value": 0, "color": "red"},
+            {"value": 1, "color": "green"},
+            {"value": 2, "color": "red"}
+          ]
+        },
+        "alert": {
+          "name": "Split Brain Detected",
+          "message": "Multiple leaders detected in Raft cluster!",
+          "conditions": [
+            {
+              "evaluator": {"params": [1], "type": "gt"},
+              "query": {"params": ["A", "1m", "now"]}
+            }
+          ]
+        }
+      },
+      {
+        "id": 2,
+        "title": "Current Term",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+        "targets": [
+          {
+            "expr": "max(raft_current_term)",
+            "legendFormat": "Term"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Elections Started",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+        "targets": [
+          {
+            "expr": "sum(raft_elections_started_total)",
+            "legendFormat": "Total Elections"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Leader Changes",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+        "targets": [
+          {
+            "expr": "sum(raft_known_leader_changes_total)",
+            "legendFormat": "Changes"
+          }
+        ],
+        "options": {
+          "colorMode": "value",
+          "thresholds": [
+            {"value": 0, "color": "green"},
+            {"value": 5, "color": "yellow"},
+            {"value": 10, "color": "red"}
+          ]
+        }
+      },
+      {
+        "id": 5,
+        "title": "Node States",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+        "targets": [
+          {
+            "expr": "raft_node_state",
+            "legendFormat": "{{instance}}"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "short",
+            "label": "State",
+            "max": 2,
+            "min": 0,
+            "show": true
+          }
+        ],
+        "seriesOverrides": [
+          {
+            "alias": "/LEADER/",
+            "color": "#73BF69"
+          },
+          {
+            "alias": "/CANDIDATE/",
+            "color": "#F2CC0C"
+          },
+          {
+            "alias": "/FOLLOWER/",
+            "color": "#5794F2"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Election Rate",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+        "targets": [
+          {
+            "expr": "rate(raft_elections_started_total[5m])",
+            "legendFormat": "Elections/sec - {{instance}}"
+          }
+        ],
+        "alert": {
+          "name": "High Election Rate",
+          "message": "Frequent elections indicate cluster instability",
+          "conditions": [
+            {
+              "evaluator": {"params": [0.1], "type": "gt"},
+              "query": {"params": ["A", "5m", "now"]}
+            }
+          ]
+        }
+      },
+      {
+        "id": 7,
+        "title": "Heartbeats Sent vs Received",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+        "targets": [
+          {
+            "expr": "rate(raft_heartbeats_sent_total[1m])",
+            "legendFormat": "Sent - {{instance}}"
+          },
+          {
+            "expr": "rate(raft_heartbeats_received_total[1m])",
+            "legendFormat": "Received - {{instance}}"
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Vote Success Rate",
+        "type": "gauge",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+        "targets": [
+          {
+            "expr": "sum(raft_votes_granted_total) / (sum(raft_votes_granted_total) + sum(raft_votes_denied_total)) * 100",
+            "legendFormat": "Success %"
+          }
+        ],
+        "options": {
+          "minValue": 0,
+          "maxValue": 100,
+          "thresholds": [
+            {"value": 0, "color": "red"},
+            {"value": 50, "color": "yellow"},
+            {"value": 80, "color": "green"}
+          ]
+        }
+      },
+      {
+        "id": 9,
+        "title": "Step Downs",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 20},
+        "targets": [
+          {
+            "expr": "rate(raft_stepdowns_total[5m])",
+            "legendFormat": "Step downs/sec - {{instance}}"
+          }
+        ],
+        "alert": {
+          "name": "Frequent Step Downs",
+          "message": "Node is frequently losing leadership",
+          "conditions": [
+            {
+              "evaluator": {"params": [0.05], "type": "gt"},
+              "query": {"params": ["A", "5m", "now"]}
+            }
+          ]
+        }
+      },
+      {
+        "id": 10,
+        "title": "Current Leaders",
+        "type": "table",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 28},
+        "targets": [
+          {
+            "expr": "raft_node_state == 2",
+            "format": "table",
+            "instant": true
+          }
+        ],
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {},
+              "indexByName": {},
+              "renameByName": {
+                "instance": "Node",
+                "Value": "Is Leader"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "refresh": "5s",
+    "schemaVersion": 27,
+    "version": 1
+  }
+}

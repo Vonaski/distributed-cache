@@ -1,6 +1,3 @@
 package com.iksanov.distributedcache.node.consensus.model;
 
-public class VoteResponse {
-    public long term;
-    public boolean voteGranted;
-}
+public record VoteResponse(long term, boolean voteGranted) {}

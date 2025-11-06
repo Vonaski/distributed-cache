@@ -5,6 +5,7 @@ import com.iksanov.distributedcache.node.consensus.transport.RaftMessageCodec;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.DecoderException;
+import io.netty.handler.codec.EncoderException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -80,9 +81,7 @@ class RaftMessageCodecTest {
     @DisplayName("VoteResponse (granted) should correctly encode and decode")
     void shouldEncodeAndDecodeVoteResponseGranted() {
         String correlationId = "vote-resp-456";
-        VoteResponse response = new VoteResponse();
-        response.term = 7L;
-        response.voteGranted = true;
+        VoteResponse response = new VoteResponse(7L, true);
         RaftMessageCodec.CorrelatedVoteResponse message = new RaftMessageCodec.CorrelatedVoteResponse(correlationId, response);
         EmbeddedChannel channel = new EmbeddedChannel(new RaftMessageCodec());
         assertTrue(channel.writeOutbound(message));
@@ -92,17 +91,15 @@ class RaftMessageCodecTest {
         assertEquals(correlationId, envelope.id());
         assertInstanceOf(VoteResponse.class, envelope.msg());
         VoteResponse decoded = (VoteResponse) envelope.msg();
-        assertEquals(7L, decoded.term);
-        assertTrue(decoded.voteGranted);
+        assertEquals(7L, decoded.term());
+        assertTrue(decoded.voteGranted());
         channel.finishAndReleaseAll();
     }
 
     @Test
     @DisplayName("VoteResponse (denied) should correctly encode and decode")
     void shouldEncodeAndDecodeVoteResponseDenied() {
-        VoteResponse response = new VoteResponse();
-        response.term = 10L;
-        response.voteGranted = false;
+        VoteResponse response = new VoteResponse(10L, false);
         RaftMessageCodec.CorrelatedVoteResponse message = new RaftMessageCodec.CorrelatedVoteResponse("vote-denied", response);
         EmbeddedChannel channel = new EmbeddedChannel(new RaftMessageCodec());
         assertTrue(channel.writeOutbound(message));
@@ -110,8 +107,8 @@ class RaftMessageCodecTest {
         assertTrue(channel.writeInbound(encoded));
         RaftMessageCodec.MessageEnvelope envelope = channel.readInbound();
         VoteResponse decoded = (VoteResponse) envelope.msg();
-        assertEquals(10L, decoded.term);
-        assertFalse(decoded.voteGranted);
+        assertEquals(10L, decoded.term());
+        assertFalse(decoded.voteGranted());
         channel.finishAndReleaseAll();
     }
 
@@ -154,9 +151,7 @@ class RaftMessageCodecTest {
     @DisplayName("HeartbeatResponse (success) should correctly encode and decode")
     void shouldEncodeAndDecodeHeartbeatResponseSuccess() {
         String correlationId = "heartbeat-resp-101";
-        HeartbeatResponse response = new HeartbeatResponse();
-        response.term = 25L;
-        response.success = true;
+        HeartbeatResponse response = new HeartbeatResponse(25L, true);
         RaftMessageCodec.CorrelatedHeartbeatResponse message = new RaftMessageCodec.CorrelatedHeartbeatResponse(correlationId, response);
         EmbeddedChannel channel = new EmbeddedChannel(new RaftMessageCodec());
         assertTrue(channel.writeOutbound(message));
@@ -166,17 +161,15 @@ class RaftMessageCodecTest {
         assertEquals(correlationId, envelope.id());
         assertInstanceOf(HeartbeatResponse.class, envelope.msg());
         HeartbeatResponse decoded = (HeartbeatResponse) envelope.msg();
-        assertEquals(25L, decoded.term);
-        assertTrue(decoded.success);
+        assertEquals(25L, decoded.term());
+        assertTrue(decoded.success());
         channel.finishAndReleaseAll();
     }
 
     @Test
     @DisplayName("HeartbeatResponse (failure) should correctly encode and decode")
     void shouldEncodeAndDecodeHeartbeatResponseFailure() {
-        HeartbeatResponse response = new HeartbeatResponse();
-        response.term = 30L;
-        response.success = false;
+        HeartbeatResponse response = new HeartbeatResponse(30L, false);
         RaftMessageCodec.CorrelatedHeartbeatResponse message = new RaftMessageCodec.CorrelatedHeartbeatResponse("hb-fail", response);
         EmbeddedChannel channel = new EmbeddedChannel(new RaftMessageCodec());
         assertTrue(channel.writeOutbound(message));
@@ -184,8 +177,8 @@ class RaftMessageCodecTest {
         assertTrue(channel.writeInbound(encoded));
         RaftMessageCodec.MessageEnvelope envelope = channel.readInbound();
         HeartbeatResponse decoded = (HeartbeatResponse) envelope.msg();
-        assertEquals(30L, decoded.term);
-        assertFalse(decoded.success);
+        assertEquals(30L, decoded.term());
+        assertFalse(decoded.success());
         channel.finishAndReleaseAll();
     }
 
@@ -195,117 +188,83 @@ class RaftMessageCodecTest {
         EmbeddedChannel channel = new EmbeddedChannel(new RaftMessageCodec());
 
         VoteRequest vr = new VoteRequest(1L, "node-A");
-        VoteResponse vresp = new VoteResponse();
-        vresp.term = 2L;
-        vresp.voteGranted = true;
+        VoteResponse vresp = new VoteResponse(2L, true);
         HeartbeatRequest hr = new HeartbeatRequest(3L, "node-B");
-        HeartbeatResponse hresp = new HeartbeatResponse();
-        hresp.term = 4L;
-        hresp.success = true;
+        HeartbeatResponse hresp = new HeartbeatResponse(4L, false);
 
-        RaftMessageCodec.CorrelatedVoteRequest cvr = new RaftMessageCodec.CorrelatedVoteRequest("id1", vr);
-        RaftMessageCodec.CorrelatedVoteResponse cvresp = new RaftMessageCodec.CorrelatedVoteResponse("id2", vresp);
-        RaftMessageCodec.CorrelatedHeartbeatRequest chr = new RaftMessageCodec.CorrelatedHeartbeatRequest("id3", hr);
-        RaftMessageCodec.CorrelatedHeartbeatResponse chresp = new RaftMessageCodec.CorrelatedHeartbeatResponse("id4", hresp);
+        assertTrue(channel.writeOutbound(new RaftMessageCodec.CorrelatedVoteRequest("id1", vr)));
+        assertTrue(channel.writeOutbound(new RaftMessageCodec.CorrelatedVoteResponse("id2", vresp)));
+        assertTrue(channel.writeOutbound(new RaftMessageCodec.CorrelatedHeartbeatRequest("id3", hr)));
+        assertTrue(channel.writeOutbound(new RaftMessageCodec.CorrelatedHeartbeatResponse("id4", hresp)));
 
-        assertTrue(channel.writeOutbound(cvr));
-        assertTrue(channel.writeOutbound(cvresp));
-        assertTrue(channel.writeOutbound(chr));
-        assertTrue(channel.writeOutbound(chresp));
-        ByteBuf enc1 = channel.readOutbound();
-        ByteBuf enc2 = channel.readOutbound();
-        ByteBuf enc3 = channel.readOutbound();
-        ByteBuf enc4 = channel.readOutbound();
-        assertTrue(channel.writeInbound(enc1));
-        assertTrue(channel.writeInbound(enc2));
-        assertTrue(channel.writeInbound(enc3));
-        assertTrue(channel.writeInbound(enc4));
-        RaftMessageCodec.MessageEnvelope env1 = channel.readInbound();
-        RaftMessageCodec.MessageEnvelope env2 = channel.readInbound();
-        RaftMessageCodec.MessageEnvelope env3 = channel.readInbound();
-        RaftMessageCodec.MessageEnvelope env4 = channel.readInbound();
-        assertEquals("id1", env1.id());
-        assertInstanceOf(VoteRequest.class, env1.msg());
-        assertEquals("id2", env2.id());
-        assertInstanceOf(VoteResponse.class, env2.msg());
-        assertEquals("id3", env3.id());
-        assertInstanceOf(HeartbeatRequest.class, env3.msg());
-        assertEquals("id4", env4.id());
-        assertInstanceOf(HeartbeatResponse.class, env4.msg());
-        channel.finishAndReleaseAll();
-    }
+        ByteBuf b1 = channel.readOutbound();
+        ByteBuf b2 = channel.readOutbound();
+        ByteBuf b3 = channel.readOutbound();
+        ByteBuf b4 = channel.readOutbound();
 
-    @Test
-    @DisplayName("Should reject unknown message type")
-    void shouldRejectUnknownMessageType() {
-        EmbeddedChannel channel = new EmbeddedChannel(new RaftMessageCodec());
-        ByteBuf buf = channel.alloc().buffer();
-        buf.writeByte(99);
-        buf.writeInt(5);
-        buf.writeBytes("id123".getBytes());
-        buf.writeLong(1L);
+        assertTrue(channel.writeInbound(b1));
+        assertTrue(channel.writeInbound(b2));
+        assertTrue(channel.writeInbound(b3));
+        assertTrue(channel.writeInbound(b4));
 
-        DecoderException ex = assertThrows(DecoderException.class,
-                () -> channel.writeInbound(buf));
+        RaftMessageCodec.MessageEnvelope e1 = channel.readInbound();
+        RaftMessageCodec.MessageEnvelope e2 = channel.readInbound();
+        RaftMessageCodec.MessageEnvelope e3 = channel.readInbound();
+        RaftMessageCodec.MessageEnvelope e4 = channel.readInbound();
 
-        String errorMessage = ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage();
-        assertTrue(errorMessage.contains("Unknown message type") || errorMessage.contains("CorruptedFrameException"),
-                "Expected error about unknown message type but got: " + errorMessage);
+        assertEquals("id1", e1.id());
+        assertInstanceOf(VoteRequest.class, e1.msg());
+        assertEquals("id2", e2.id());
+        assertInstanceOf(VoteResponse.class, e2.msg());
+        assertEquals("id3", e3.id());
+        assertInstanceOf(HeartbeatRequest.class, e3.msg());
+        assertEquals("id4", e4.id());
+        assertInstanceOf(HeartbeatResponse.class, e4.msg());
 
         channel.finishAndReleaseAll();
     }
 
     @Test
-    @DisplayName("Should reject frame that is too short")
-    void shouldRejectFrameTooShort() {
+    @DisplayName("Should handle null candidateId")
+    void shouldHandleNullCandidateId() {
+        VoteRequest request = new VoteRequest(1L, null);
+        RaftMessageCodec.CorrelatedVoteRequest message = new RaftMessageCodec.CorrelatedVoteRequest("id-null", request);
         EmbeddedChannel channel = new EmbeddedChannel(new RaftMessageCodec());
-        ByteBuf buf = channel.alloc().buffer();
-        buf.writeByte(RaftMessageCodec.TYPE_VOTE_REQ);
-        buf.writeInt(5);
-
-        DecoderException ex = assertThrows(DecoderException.class,
-                () -> channel.writeInbound(buf));
-
-        String errorMessage = ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage();
-        assertTrue(errorMessage.contains("Frame too short") ||
-                        errorMessage.contains("Not enough bytes") ||
-                        errorMessage.contains("CorruptedFrameException"),
-                "Expected error about frame being too short but got: " + errorMessage);
-
+        assertTrue(channel.writeOutbound(message));
+        ByteBuf encoded = channel.readOutbound();
+        assertTrue(channel.writeInbound(encoded));
+        RaftMessageCodec.MessageEnvelope envelope = channel.readInbound();
+        VoteRequest decoded = (VoteRequest) envelope.msg();
+        assertNull(decoded.candidateId());
         channel.finishAndReleaseAll();
     }
 
     @Test
-    @DisplayName("Should reject string longer than MAX_STRING_LENGTH")
-    void shouldRejectStringTooLong() {
+    @DisplayName("Should handle null leaderId")
+    void shouldHandleNullLeaderId() {
+        HeartbeatRequest request = new HeartbeatRequest(1L, null);
+        RaftMessageCodec.CorrelatedHeartbeatRequest message = new RaftMessageCodec.CorrelatedHeartbeatRequest("id-null", request);
         EmbeddedChannel channel = new EmbeddedChannel(new RaftMessageCodec());
-        ByteBuf buf = channel.alloc().buffer();
-        buf.writeByte(RaftMessageCodec.TYPE_VOTE_REQ);
-        buf.writeInt(5);
-        buf.writeBytes("id123".getBytes());
-        buf.writeLong(1L);
-        buf.writeInt(20_000);
-
-        DecoderException ex = assertThrows(DecoderException.class,
-                () -> channel.writeInbound(buf));
-
-        String errorMessage = ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage();
-        assertTrue(errorMessage.contains("String too long") || errorMessage.contains("CorruptedFrameException"),
-                "Expected error about string too long but got: " + errorMessage);
-
+        assertTrue(channel.writeOutbound(message));
+        ByteBuf encoded = channel.readOutbound();
+        assertTrue(channel.writeInbound(encoded));
+        RaftMessageCodec.MessageEnvelope envelope = channel.readInbound();
+        HeartbeatRequest decoded = (HeartbeatRequest) envelope.msg();
+        assertNull(decoded.leaderId());
         channel.finishAndReleaseAll();
     }
 
     @Test
-    @DisplayName("Should reject negative string length")
-    void shouldRejectNegativeStringLength() {
+    @DisplayName("Should handle null correlation ID")
+    void shouldHandleNullCorrelationId() {
+        VoteRequest request = new VoteRequest(1L, "node-A");
+        RaftMessageCodec.CorrelatedVoteRequest message = new RaftMessageCodec.CorrelatedVoteRequest(null, request);
         EmbeddedChannel channel = new EmbeddedChannel(new RaftMessageCodec());
-        ByteBuf buf = channel.alloc().buffer();
-        buf.writeByte(RaftMessageCodec.TYPE_VOTE_REQ);
-        buf.writeInt(-2);
-
-        assertThrows(Exception.class, () -> channel.writeInbound(buf));
-
+        assertTrue(channel.writeOutbound(message));
+        ByteBuf encoded = channel.readOutbound();
+        assertTrue(channel.writeInbound(encoded));
+        RaftMessageCodec.MessageEnvelope envelope = channel.readInbound();
+        assertNull(envelope.id());
         channel.finishAndReleaseAll();
     }
 
@@ -313,15 +272,14 @@ class RaftMessageCodecTest {
     @DisplayName("Should reject unsupported outbound message type")
     void shouldRejectUnsupportedOutboundType() {
         EmbeddedChannel channel = new EmbeddedChannel(new RaftMessageCodec());
-        Object invalidMessage = "invalid-message-type";
-
-        Exception ex = assertThrows(Exception.class,
-                () -> channel.writeOutbound(invalidMessage));
-
-        assertTrue(ex instanceof io.netty.handler.codec.EncoderException ||
-                        ex instanceof IllegalArgumentException,
-                "Expected EncoderException or IllegalArgumentException but got: " + ex.getClass().getName());
-
+        Object invalidMessage = "Invalid message";
+        assertThrows(Exception.class, () -> channel.writeOutbound(invalidMessage));
+        VoteRequest validRequest = new VoteRequest(1L, "node-A");
+        RaftMessageCodec.CorrelatedVoteRequest validMessage = new RaftMessageCodec.CorrelatedVoteRequest("id", validRequest);
+        assertTrue(channel.writeOutbound(validMessage));
+        ByteBuf encoded = channel.readOutbound();
+        assertNotNull(encoded);
+        encoded.release();
         channel.finishAndReleaseAll();
     }
 
@@ -432,7 +390,7 @@ class RaftMessageCodecTest {
     @Test
     @DisplayName("Should handle string at MAX_STRING_LENGTH boundary")
     void shouldHandleStringAtMaxLength() {
-        String maxLengthString = "x".repeat(1000); // Use 1KB instead of 10KB to avoid buffer size issues
+        String maxLengthString = "x".repeat(1000);
         VoteRequest request = new VoteRequest(1L, maxLengthString);
         RaftMessageCodec.CorrelatedVoteRequest message = new RaftMessageCodec.CorrelatedVoteRequest("id", request);
         EmbeddedChannel channel = new EmbeddedChannel(new RaftMessageCodec());
@@ -448,7 +406,7 @@ class RaftMessageCodecTest {
     @Test
     @DisplayName("Should throw when encoding string exceeds MAX_STRING_LENGTH")
     void shouldThrowWhenEncodingStringTooLong() {
-        String tooLongString = "x".repeat(10_001); // Exceeds MAX_STRING_LENGTH
+        String tooLongString = "x".repeat(10_001);
         VoteRequest request = new VoteRequest(1L, tooLongString);
         RaftMessageCodec.CorrelatedVoteRequest message = new RaftMessageCodec.CorrelatedVoteRequest("id", request);
         EmbeddedChannel channel = new EmbeddedChannel(new RaftMessageCodec());

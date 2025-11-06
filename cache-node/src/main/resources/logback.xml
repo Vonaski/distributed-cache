@@ -29,5 +29,8 @@
 
     <logger name="com.iksanov.distributedcache.node" level="DEBUG"/>
     <logger name="com.iksanov.distributedcache.common" level="DEBUG"/>
+    <logger name="com.iksanov.distributedcache.node.consensus" level="DEBUG"/>
+    <logger name="com.iksanov.distributedcache.node.consensus.RaftNode" level="INFO"/>
+    <logger name="com.iksanov.distributedcache.node.consensus.transport" level="TRACE"/>
     <logger name="io.netty" level="INFO"/>
 </configuration>

@@ -50,8 +50,8 @@ public class RaftMessageCodec extends MessageToMessageCodec<ByteBuf, Object> {
                 case CorrelatedVoteResponse cvrsp -> {
                     buf.writeByte(TYPE_VOTE_RESP);
                     writeString(buf, cvrsp.id);
-                    buf.writeLong(cvrsp.response.term);
-                    buf.writeByte(cvrsp.response.voteGranted ? BOOLEAN_TRUE : BOOLEAN_FALSE);
+                    buf.writeLong(cvrsp.response.term());
+                    buf.writeByte(cvrsp.response.voteGranted() ? BOOLEAN_TRUE : BOOLEAN_FALSE);
                 }
                 case CorrelatedHeartbeatRequest chr -> {
                     buf.writeByte(TYPE_HEARTBEAT_REQ);
@@ -62,8 +62,8 @@ public class RaftMessageCodec extends MessageToMessageCodec<ByteBuf, Object> {
                 case CorrelatedHeartbeatResponse chrsp -> {
                     buf.writeByte(TYPE_HEARTBEAT_RESP);
                     writeString(buf, chrsp.id);
-                    buf.writeLong(chrsp.response.term);
-                    buf.writeByte(chrsp.response.success ? BOOLEAN_TRUE : BOOLEAN_FALSE);
+                    buf.writeLong(chrsp.response.term());
+                    buf.writeByte(chrsp.response.success() ? BOOLEAN_TRUE : BOOLEAN_FALSE);
                 }
                 default -> {
                     buf.release();
@@ -92,14 +92,9 @@ public class RaftMessageCodec extends MessageToMessageCodec<ByteBuf, Object> {
                 out.add(new MessageEnvelope(id, vr));
             }
             case TYPE_VOTE_RESP -> {
-                if (in.readableBytes() < 1) {
-                    throw new CorruptedFrameException("Not enough bytes for voteGranted field");
-                }
+                if (in.readableBytes() < 1) throw new CorruptedFrameException("Not enough bytes for voteGranted field");
                 boolean granted = in.readByte() == BOOLEAN_TRUE;
-                VoteResponse vr = new VoteResponse();
-                vr.term = term;
-                vr.voteGranted = granted;
-                out.add(new MessageEnvelope(id, vr));
+                out.add(new MessageEnvelope(id, new VoteResponse(term, granted)));
             }
             case TYPE_HEARTBEAT_REQ -> {
                 String leaderId = readString(in);
@@ -107,14 +102,9 @@ public class RaftMessageCodec extends MessageToMessageCodec<ByteBuf, Object> {
                 out.add(new MessageEnvelope(id, hr));
             }
             case TYPE_HEARTBEAT_RESP -> {
-                if (in.readableBytes() < 1) {
-                    throw new CorruptedFrameException("Not enough bytes for success field");
-                }
+                if (in.readableBytes() < 1) throw new CorruptedFrameException("Not enough bytes for success field");
                 boolean success = in.readByte() == BOOLEAN_TRUE;
-                HeartbeatResponse hr = new HeartbeatResponse();
-                hr.term = term;
-                hr.success = success;
-                out.add(new MessageEnvelope(id, hr));
+                out.add(new MessageEnvelope(id, new HeartbeatResponse(term, success)));
             }
             default -> throw new CorruptedFrameException("Unknown type: " + type);
         }
@@ -126,9 +116,7 @@ public class RaftMessageCodec extends MessageToMessageCodec<ByteBuf, Object> {
             return;
         }
         byte[] b = s.getBytes(StandardCharsets.UTF_8);
-        if (b.length > MAX_STRING_LENGTH) {
-            throw new IllegalArgumentException("String too long: " + b.length + " bytes");
-        }
+        if (b.length > MAX_STRING_LENGTH) throw new IllegalArgumentException("String too long: " + b.length + " bytes");
         buf.writeInt(b.length);
         buf.writeBytes(b);
     }

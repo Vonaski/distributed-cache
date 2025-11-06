@@ -195,7 +195,7 @@ class ConsensusIntegrationTest {
                                 "candidate-" + threadId
                         );
                         VoteResponse response = targetNode.handleVoteRequest(request);
-                        if (response.voteGranted) {
+                        if (response.voteGranted()) {
                             grantedVotes.incrementAndGet();
                         } else {
                             deniedVotes.incrementAndGet();
@@ -243,7 +243,7 @@ class ConsensusIntegrationTest {
                                 "leader-" + threadId
                         );
                         HeartbeatResponse response = targetNode.handleHeartbeat(request);
-                        if (response.success) successCount.incrementAndGet();
+                        if (response.success()) successCount.incrementAndGet();
                     }
                 } catch (Exception e) {
                     errors.incrementAndGet();

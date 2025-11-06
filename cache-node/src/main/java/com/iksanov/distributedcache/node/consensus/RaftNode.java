@@ -167,13 +167,13 @@ public class RaftNode {
                             return;
                         }
 
-                        if (resp.term > electionTerm) {
+                        if (resp.term() > electionTerm) {
                             try {
-                                stepDown(resp.term);
+                                stepDown(resp.term());
                             } catch (Exception e) {
                                 log.error("[Raft] Error in stepDown: {}", e.getMessage());
                             }
-                        } else if (resp.term == electionTerm && resp.voteGranted) {
+                        } else if (resp.term() == electionTerm && resp.voteGranted()) {
                             int v = votes.incrementAndGet();
                             log.debug("[Raft] Node {} got vote from {} ({}/{})", nodeId, peer, v, votesNeeded);
                             if (v >= votesNeeded) {
@@ -184,20 +184,18 @@ public class RaftNode {
         }
     }
 
-    private void becomeLeader(long electionTerm) {
+    private void becomeLeader(long term) {
         stateLock.lock();
         try {
-            if (state != NodeState.CANDIDATE || currentTerm.get() != electionTerm) {
-                log.debug("[Raft] Cannot become leader: state={}, term changed", state);
-                return;
-            }
+            if (state == NodeState.LEADER) return;
+            if (currentTerm.get() != term) return;
             state = NodeState.LEADER;
             currentLeader = nodeId;
-            if (electionTimerFuture != null) electionTimerFuture.cancel(false);
+            log.info("[Raft] Node {} became LEADER for term {}", nodeId, term);
             metrics.incrementLeadersElected(currentTerm.get());
-            log.info("[Raft] Node {} became LEADER for term {}", nodeId, currentTerm.get());
-            startHeartbeatTimer();
             listeners.forEach(l -> safeCall(() -> l.onBecomeLeader()));
+            listeners.forEach(l -> safeCall(() -> l.onLeaderChange(nodeId)));
+            startHeartbeatTimer();
         } finally {
             stateLock.unlock();
         }
@@ -242,9 +240,9 @@ public class RaftNode {
                                 log.trace("[Raft] Heartbeat to {} failed: {}", peer, ex.getMessage());
                                 return;
                             }
-                            if (resp.term > currentTerm.get()) {
+                            if (resp.term() > currentTerm.get()) {
                                 try {
-                                    stepDown(resp.term);
+                                    stepDown(resp.term());
                                 } catch (Exception e) {
                                     log.error("[Raft] Error in stepDown: {}", e.getMessage());
                                 }
@@ -258,40 +256,31 @@ public class RaftNode {
     public VoteResponse handleVoteRequest(VoteRequest req) {
         stateLock.lock();
         try {
-            VoteResponse resp = new VoteResponse();
             if (!peers.contains(req.candidateId()) && !req.candidateId().equals(nodeId)) {
                 log.debug("[Raft] Node {} denies vote to UNKNOWN candidate {}", nodeId, req.candidateId());
-                resp.term = currentTerm.get();
-                resp.voteGranted = false;
                 metrics.incrementVoteDenied();
-                return resp;
+                return new VoteResponse(currentTerm.get(), false);
             }
             if (req.term() < currentTerm.get()) {
-                resp.term = currentTerm.get();
-                resp.voteGranted = false;
-                return resp;
+                return new VoteResponse(currentTerm.get(), false);
             }
             if (req.term() > currentTerm.get()) stepDown(req.term());
-            resp.term = currentTerm.get();
+
             if (votedFor == null || votedFor.equals(req.candidateId())) {
                 votedFor = req.candidateId();
                 persistence.saveVotedFor(votedFor);
                 startElectionTimer();
-                resp.voteGranted = true;
                 log.debug("[Raft] Node {} grants vote to {} for term {}", nodeId, req.candidateId(), req.term());
                 metrics.incrementVoteGranted();
+                return new VoteResponse(currentTerm.get(), true);
             } else {
                 log.debug("[Raft] Node {} denies vote to {} (already voted for {})", nodeId, req.candidateId(), votedFor);
-                resp.voteGranted = false;
                 metrics.incrementVoteDenied();
+                return new VoteResponse(currentTerm.get(), false);
             }
-            return resp;
         } catch (Exception e) {
             log.error("[Raft] Error handling VoteRequest: {}", e.getMessage(), e);
-            VoteResponse resp = new VoteResponse();
-            resp.term = currentTerm.get();
-            resp.voteGranted = false;
-            return resp;
+            return new VoteResponse(currentTerm.get(), false);
         } finally {
             stateLock.unlock();
         }
@@ -300,33 +289,24 @@ public class RaftNode {
     public HeartbeatResponse handleHeartbeat(HeartbeatRequest req) {
         stateLock.lock();
         try {
-            HeartbeatResponse resp = new HeartbeatResponse();
-            resp.term = currentTerm.get();
             if (!peers.contains(req.leaderId()) && !req.leaderId().equals(nodeId)) {
                 log.debug("[Raft] Node {} ignores heartbeat from UNKNOWN leader {}", nodeId, req.leaderId());
-                resp.success = false;
-                return resp;
+                return new HeartbeatResponse(currentTerm.get(), false);
             }
             if (req.term() < currentTerm.get()) {
-                resp.success = false;
-                return resp;
+                return new HeartbeatResponse(currentTerm.get(), false);
             }
             if (req.term() > currentTerm.get()) {
                 stepDown(req.term());
-                resp.term = currentTerm.get();
             }
             currentLeader = req.leaderId();
-            resp.success = true;
             log.trace("[Raft] Node {} received heartbeat from leader {} (term={})", nodeId, req.leaderId(), req.term());
             metrics.incrementHeartbeatsReceived();
             startElectionTimer();
-            return resp;
+            return new HeartbeatResponse(currentTerm.get(), true);
         } catch (Exception e) {
             log.error("[Raft] Error handling Heartbeat: {}", e.getMessage(), e);
-            HeartbeatResponse resp = new HeartbeatResponse();
-            resp.term = currentTerm.get();
-            resp.success = false;
-            return resp;
+            return new HeartbeatResponse(currentTerm.get(), false);
         } finally {
             stateLock.unlock();
         }
