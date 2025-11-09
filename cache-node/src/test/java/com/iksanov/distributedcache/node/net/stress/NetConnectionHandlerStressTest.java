@@ -3,7 +3,10 @@ package com.iksanov.distributedcache.node.net.stress;
 import com.iksanov.distributedcache.common.dto.CacheRequest;
 import com.iksanov.distributedcache.common.dto.CacheResponse;
 import com.iksanov.distributedcache.node.core.CacheStore;
+import com.iksanov.distributedcache.node.metrics.NetMetrics;
 import com.iksanov.distributedcache.node.net.NetConnectionHandler;
+import com.iksanov.distributedcache.node.net.RequestProcessor;
+import com.iksanov.distributedcache.node.replication.ReplicationManager;
 import io.netty.channel.embedded.EmbeddedChannel;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -37,22 +40,21 @@ class NetConnectionHandlerStressTest {
     @Test
     @DisplayName("Should process 10k concurrent requests across multiple channels")
     void shouldHandleConcurrentRequests() throws Exception {
-        // Mock CacheStore to simulate fast access
         CacheStore store = mock(CacheStore.class);
+        NetMetrics metrics = mock(NetMetrics.class);
+        RequestProcessor processor = mock(RequestProcessor.class);
+        ReplicationManager replicationManager = mock(ReplicationManager.class);
         when(store.get(anyString())).thenReturn("v");
         doNothing().when(store).put(anyString(), anyString());
         doNothing().when(store).delete(anyString());
-
         ExecutorService pool = Executors.newWorkStealingPool(THREADS);
         CountDownLatch latch = new CountDownLatch(THREADS);
         List<Future<Integer>> results = new ArrayList<>();
-
         long start = System.nanoTime();
 
-        // Each thread runs its own EmbeddedChannel instance
         for (int t = 0; t < THREADS; t++) {
             results.add(pool.submit(() -> {
-                var handler = new NetConnectionHandler(store);
+                var handler = new NetConnectionHandler(processor, metrics);
                 var channel = new EmbeddedChannel(handler);
 
                 int responses = 0;

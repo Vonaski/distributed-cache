@@ -8,8 +8,8 @@ import com.iksanov.distributedcache.node.config.ApplicationConfig.NodeRole;
 import com.iksanov.distributedcache.node.core.InMemoryCacheStore;
 import com.iksanov.distributedcache.node.metrics.CacheMetrics;
 import com.iksanov.distributedcache.node.metrics.MetricsServer;
+import com.iksanov.distributedcache.node.metrics.NetMetrics;
 import com.iksanov.distributedcache.node.metrics.RaftMetrics;
-import com.iksanov.distributedcache.node.metrics.ReplicationMetrics;
 import com.iksanov.distributedcache.node.net.NetServer;
 import com.iksanov.distributedcache.node.replication.ReplicationManager;
 import com.iksanov.distributedcache.node.replication.ReplicationReceiver;
@@ -35,8 +35,8 @@ public class CacheNodeApplication {
     private final CountDownLatch shutdownLatch = new CountDownLatch(1);
     private CacheMetrics cacheMetrics;
     private RaftMetrics raftMetrics;
-    private ReplicationMetrics replicationMetrics;
     private MetricsServer metricsServer;
+    private NetMetrics netMetrics;
 
     public CacheNodeApplication(ApplicationConfig config) {
         this.config = config;
@@ -59,13 +59,13 @@ public class CacheNodeApplication {
         try {
             cacheMetrics = new CacheMetrics();
             raftMetrics = new RaftMetrics();
-            replicationMetrics = new ReplicationMetrics();
+            netMetrics = new NetMetrics();
             log.info("✓ Metrics initialized");
 
             cache = new InMemoryCacheStore(config.cacheMaxSize(), config.cacheTtlMillis(), 5000, cacheMetrics);
             log.info("✓ Cache initialized (size={})", config.cacheMaxSize());
 
-            metricsServer = new MetricsServer(8081, cacheMetrics, raftMetrics, replicationMetrics);
+            metricsServer = new MetricsServer(8081, cacheMetrics, raftMetrics, netMetrics);
             metricsServer.start();
             log.info("✓ Metrics server started on port 8081");
 
@@ -74,7 +74,7 @@ public class CacheNodeApplication {
                 log.info("✓ Cluster mode enabled (role={})", config.role());
             }
 
-            netServer = new NetServer(config.toNetServerConfig(), cache, replicationManager);
+            netServer = new NetServer(config.toNetServerConfig(), cache, replicationManager, netMetrics);
             netServer.start();
             log.info("✓ Server listening on {}:{}", config.host(), config.port());
 

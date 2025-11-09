@@ -20,7 +20,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  * - Bytes 8-263: votedFor (UTF-8 string, max 255 chars)
  * - Bytes 264-511: reserved for future use
  */
-public class FileBasedRaftPersistence implements RaftPersistence {
+public class FileBasedRaftPersistence implements RaftPersistence{
     private static final Logger log = LoggerFactory.getLogger(FileBasedRaftPersistence.class);
     private static final int FILE_SIZE = 512;
     private static final int TERM_OFFSET = 0;

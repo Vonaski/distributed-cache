@@ -6,6 +6,7 @@ import com.iksanov.distributedcache.common.dto.CacheResponse;
 import com.iksanov.distributedcache.node.config.NetServerConfig;
 import com.iksanov.distributedcache.node.core.InMemoryCacheStore;
 import com.iksanov.distributedcache.node.metrics.CacheMetrics;
+import com.iksanov.distributedcache.node.metrics.NetMetrics;
 import com.iksanov.distributedcache.node.net.NetServer;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
@@ -39,11 +40,12 @@ public class NetServerIntegrationTest {
     private NioEventLoopGroup clientGroup;
     private Bootstrap clientBootstrap;
     private final Map<String, CompletableFuture<CacheResponse>> responseMap = new ConcurrentHashMap<>();
-    private final CacheMetrics metrics = new CacheMetrics();
+    private final CacheMetrics cacheMetrics = new CacheMetrics();
+    private final NetMetrics netMetrics = new NetMetrics();
 
     @BeforeAll
     void setUp() {
-        InMemoryCacheStore store = new InMemoryCacheStore(10_000, 60_000, 5_000, metrics);
+        InMemoryCacheStore store = new InMemoryCacheStore(10_000, 60_000, 5_000, cacheMetrics);
 
         NetServerConfig config = new NetServerConfig(
                 HOST,
@@ -56,7 +58,7 @@ public class NetServerIntegrationTest {
                 10
         );
 
-        server = new NetServer(config, store, null);
+        server = new NetServer(config, store, null, netMetrics);
         server.start();
 
         clientGroup = new NioEventLoopGroup();

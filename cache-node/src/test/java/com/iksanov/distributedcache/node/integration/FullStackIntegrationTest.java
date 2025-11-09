@@ -9,8 +9,8 @@ import com.iksanov.distributedcache.node.config.NetServerConfig;
 import com.iksanov.distributedcache.node.core.CacheStore;
 import com.iksanov.distributedcache.node.core.InMemoryCacheStore;
 import com.iksanov.distributedcache.node.metrics.CacheMetrics;
+import com.iksanov.distributedcache.node.metrics.NetMetrics;
 import com.iksanov.distributedcache.node.metrics.RaftMetrics;
-import com.iksanov.distributedcache.node.metrics.ReplicationMetrics;
 import com.iksanov.distributedcache.node.net.NetServer;
 import com.iksanov.distributedcache.node.replication.ReplicationManager;
 import com.iksanov.distributedcache.node.replication.ReplicationReceiver;
@@ -69,6 +69,7 @@ class FullStackIntegrationTest {
     private CacheMetrics cacheMetrics;
     private RaftMetrics raftMetrics;
     private ReplicationMetrics replicationMetrics;
+    private NetMetrics netMetrics;
 
     @BeforeAll
     void setupCluster() throws Exception {
@@ -84,6 +85,7 @@ class FullStackIntegrationTest {
         cacheMetrics = new CacheMetrics();
         raftMetrics = new RaftMetrics();
         replicationMetrics = new ReplicationMetrics();
+        netMetrics = new NetMetrics();
         replicationManagers = new ConcurrentHashMap<>();
         senders = new ConcurrentHashMap<>();
         receivers = new ConcurrentHashMap<>();
@@ -135,7 +137,7 @@ class FullStackIntegrationTest {
                     5,  // read timeout
                     30  // write timeout
             );
-            NetServer netServer = new NetServer(config, store, replManager);
+            NetServer netServer = new NetServer(config, store, replManager, netMetrics);
             netServer.start();
             netServers.put(node.nodeId(), netServer);
             System.out.println("    ✅ Node " + node.nodeId() + " started on port " + node.port());

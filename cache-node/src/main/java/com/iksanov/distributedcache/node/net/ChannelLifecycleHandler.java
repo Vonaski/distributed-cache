@@ -1,11 +1,11 @@
 package com.iksanov.distributedcache.node.net;
 
+import com.iksanov.distributedcache.node.metrics.NetMetrics;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * ChannelLifecycleHandler tracks the lifecycle of client connections.
@@ -19,29 +19,30 @@ import java.util.concurrent.atomic.AtomicLong;
 public class ChannelLifecycleHandler extends ChannelInboundHandlerAdapter {
 
     private static final Logger log = LoggerFactory.getLogger(ChannelLifecycleHandler.class);
-    private final AtomicLong activeConnections = new AtomicLong(0);
+    private final NetMetrics metrics;
+
+    public ChannelLifecycleHandler(NetMetrics metrics) {
+        this.metrics = metrics;
+    }
 
     @Override
     public void channelActive(ChannelHandlerContext ctx) {
-        long count = activeConnections.incrementAndGet();
-        log.info("Client connected: {} (active connections = {})", ctx.channel().remoteAddress(), count);
+        metrics.incrementConnections();
+        log.info("Connection established from {} (active: {})", ctx.channel().remoteAddress(), metrics.getActiveConnections());
         ctx.fireChannelActive();
     }
 
     @Override
     public void channelInactive(ChannelHandlerContext ctx) {
-        long count = activeConnections.updateAndGet(prev -> Math.max(0, prev - 1));
-        log.info("Client disconnected: {} (active connections = {})", ctx.channel().remoteAddress(), count);
+        metrics.incrementClosedConnections();
+        log.info("Connection closed from {} (active: {})", ctx.channel().remoteAddress(), metrics.getActiveConnections());
         ctx.fireChannelInactive();
     }
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+        metrics.incrementErrors();
         log.error("Unhandled exception from client {}: {}", ctx.channel().remoteAddress(), cause.getMessage(), cause);
         ctx.close();
-    }
-
-    public long getActiveConnections() {
-        return activeConnections.get();
     }
 }

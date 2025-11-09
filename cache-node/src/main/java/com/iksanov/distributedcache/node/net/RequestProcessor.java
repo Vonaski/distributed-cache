@@ -4,10 +4,10 @@ import com.iksanov.distributedcache.common.dto.CacheRequest;
 import com.iksanov.distributedcache.common.dto.CacheResponse;
 import com.iksanov.distributedcache.common.exception.CacheException;
 import com.iksanov.distributedcache.node.core.CacheStore;
+import com.iksanov.distributedcache.node.metrics.NetMetrics;
 import com.iksanov.distributedcache.node.replication.ReplicationManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
@@ -29,27 +29,18 @@ public class RequestProcessor {
     private final CacheStore store;
     private final ReplicationManager replicationManager;
     private static final long SLOW_REQUEST_THRESHOLD_MS = 100;
+    private final NetMetrics metrics;
 
-    public RequestProcessor(CacheStore store) {
-        this(store, null);
-    }
-
-    public RequestProcessor(CacheStore store, ReplicationManager replicationManager) {
+    public RequestProcessor(CacheStore store, ReplicationManager replicationManager, NetMetrics metrics) {
         this.store = Objects.requireNonNull(store, "store");
         this.replicationManager = replicationManager;
+        this.metrics = Objects.requireNonNull(metrics, "metrics");
     }
 
-    /**
-     * Processes a single CacheRequest and returns a CacheResponse.
-     * This method is synchronous and blocking but can be extended for async/offload later.
-     *
-     * @param request Incoming cache command request
-     * @return A response object representing the result of the operation
-     */
     public CacheResponse process(CacheRequest request) {
         Objects.requireNonNull(request, "request");
-
         Instant start = Instant.now();
+        metrics.incrementRequests();
         try {
             return switch (request.command()) {
                 case GET -> handleGet(request);
@@ -57,15 +48,21 @@ public class RequestProcessor {
                 case DELETE -> handleDelete(request);
             };
         } catch (CacheException ce) {
+            metrics.incrementErrors();
             log.error("CacheException while processing requestId={}: {}", request.requestId(), ce.getMessage());
             return CacheResponse.error(request.requestId(), ce.getMessage());
         } catch (Exception e) {
+            metrics.incrementErrors();
             log.error("Unexpected error while processing requestId={}", request.requestId(), e);
             return CacheResponse.error(request.requestId(), "Internal server error");
         } finally {
-            Duration duration = Duration.between(start, Instant.now());
-            if (duration.toMillis() > SLOW_REQUEST_THRESHOLD_MS) {
-                log.debug("Processed requestId={} command={} in {} ms", request.requestId(), request.command(), duration.toMillis());
+            long durationMs = Duration.between(start, Instant.now()).toMillis();
+            metrics.recordRequestDuration(durationMs);
+            metrics.incrementResponses();
+            if (durationMs > SLOW_REQUEST_THRESHOLD_MS) {
+                log.warn("Slow request [command={}, requestId={}] took {} ms", request.command(), request.requestId(), durationMs);
+            } else {
+                log.debug("Request [command={}, requestId={}] processed in {} ms", request.command(), request.requestId(), durationMs);
             }
         }
     }
@@ -73,7 +70,11 @@ public class RequestProcessor {
     private CacheResponse handleGet(CacheRequest request) {
         String key = requireKey(request);
         String value = store.get(key);
-        if (value == null) return CacheResponse.notFound(request.requestId());
+        if (value == null) {
+            log.debug("GET miss for key={}", key);
+            return CacheResponse.notFound(request.requestId());
+        }
+        log.trace("GET hit for key={} valueLength={}", key, value.length());
         return CacheResponse.ok(request.requestId(), value);
     }
 
@@ -81,12 +82,12 @@ public class RequestProcessor {
         String key = requireKey(request);
         String value = requireValue(request);
         store.put(key, value);
-        if (replicationManager != null) {
-            try {
-                replicationManager.onLocalSet(key, value);
-            } catch (Exception e) {
-                log.warn("ReplicationManager.onLocalSet threw exception for key={}: {}", key, e.getMessage());
-            }
+        log.trace("SET key={} valueLength={}", key, value.length());
+        try {
+            replicationManager.onLocalSet(key, value);
+        } catch (Exception e) {
+            metrics.incrementErrors();
+            log.error("ReplicationManager.onLocalSet failed for key={}: {}", key, e.getMessage(), e);
         }
         return CacheResponse.ok(request.requestId(), "OK");
     }
@@ -94,12 +95,12 @@ public class RequestProcessor {
     private CacheResponse handleDelete(CacheRequest request) {
         String key = requireKey(request);
         store.delete(key);
-        if (replicationManager != null) {
-            try {
-                replicationManager.onLocalDelete(key);
-            } catch (Exception e) {
-                log.warn("ReplicationManager.onLocalDelete threw exception for key={}: {}", key, e.getMessage());
-            }
+        log.trace("DELETE key={}", key);
+        try {
+            replicationManager.onLocalDelete(key);
+        } catch (Exception e) {
+            metrics.incrementErrors();
+            log.error("ReplicationManager.onLocalDelete failed for key={}: {}", key, e.getMessage(), e);
         }
         return CacheResponse.ok(request.requestId(), "OK");
     }

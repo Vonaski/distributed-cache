@@ -1,146 +1,225 @@
 package com.iksanov.distributedcache.node.consensus.transport;
 
-import com.iksanov.distributedcache.node.consensus.model.*;
+import com.iksanov.distributedcache.common.exception.SerializationException;
+import com.iksanov.distributedcache.node.consensus.model.AppendEntriesRequest;
+import com.iksanov.distributedcache.node.consensus.model.AppendEntriesResponse;
+import com.iksanov.distributedcache.node.consensus.model.Command;
+import com.iksanov.distributedcache.node.consensus.model.LogEntry;
+import com.iksanov.distributedcache.node.consensus.model.VoteRequest;
+import com.iksanov.distributedcache.node.consensus.model.VoteResponse;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.CorruptedFrameException;
 import io.netty.handler.codec.MessageToMessageCodec;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
-/**
- * Binary codec for Raft messages with correlation id.
- * <p>
- * Wire format:
- * [type:byte] [idLen:int] [idBytes] [term:long] [payload...]
- * <p>
- * Types:
- * 1 - VoteRequest      -> [candidateIdLen:int][candidateIdBytes]
- * 2 - VoteResponse     -> [voteGranted:byte]
- * 3 - HeartbeatRequest -> [leaderIdLen:int][leaderIdBytes]
- * 4 - HeartbeatResponse-> [success:byte]
- * <p>
- * Decoding produces MessageEnvelope instances: (id, payloadObject)
- */
-public class RaftMessageCodec extends MessageToMessageCodec<ByteBuf, Object> {
+public final class RaftMessageCodec extends MessageToMessageCodec<ByteBuf, Object> {
 
-    public static final byte TYPE_VOTE_REQ = 1;
-    public static final byte TYPE_VOTE_RESP = 2;
-    public static final byte TYPE_HEARTBEAT_REQ = 3;
-    public static final byte TYPE_HEARTBEAT_RESP = 4;
+    private static final byte PROTOCOL_VERSION = 1;
+    private static final byte TYPE_VOTE_REQUEST = 1;
+    private static final byte TYPE_VOTE_RESPONSE = 2;
+    private static final byte TYPE_APPEND_ENTRIES = 3;
+    private static final byte TYPE_APPEND_RESPONSE = 4;
+
     private static final int MAX_STRING_LENGTH = 10_000;
-    private static final int MIN_HEADER_SIZE = 1 + 4 + 8; // type + idLen + term
-    private static final byte BOOLEAN_TRUE = 1;
-    private static final byte BOOLEAN_FALSE = 0;
-
-    public record MessageEnvelope(String id, Object msg) {
-    }
+    private static final int MAX_PAYLOAD = 5 * 1024 * 1024;
+    private static final int MAX_ENTRIES = 10_000;
+    private static final int MAX_ENTRY_KEY_LEN = 1024;
+    private static final int MAX_ENTRY_VALUE_LEN = 64 * 1024;
 
     @Override
     protected void encode(ChannelHandlerContext ctx, Object msg, List<Object> out) {
-        ByteBuf buf = ctx.alloc().buffer(256, 4096);
+        Objects.requireNonNull(msg, "msg");
+        ByteBuf buffer = ctx.alloc().buffer();
+        buffer.writeByte(PROTOCOL_VERSION);
+
         try {
             switch (msg) {
-                case CorrelatedVoteRequest cvr -> {
-                    buf.writeByte(TYPE_VOTE_REQ);
-                    writeString(buf, cvr.id);
-                    buf.writeLong(cvr.request.term());
-                    writeString(buf, cvr.request.candidateId());
+                case VoteRequest req -> {
+                    buffer.writeByte(TYPE_VOTE_REQUEST);
+                    encodeVoteRequest(buffer, req);
                 }
-                case CorrelatedVoteResponse cvrsp -> {
-                    buf.writeByte(TYPE_VOTE_RESP);
-                    writeString(buf, cvrsp.id);
-                    buf.writeLong(cvrsp.response.term());
-                    buf.writeByte(cvrsp.response.voteGranted() ? BOOLEAN_TRUE : BOOLEAN_FALSE);
+                case VoteResponse resp -> {
+                    buffer.writeByte(TYPE_VOTE_RESPONSE);
+                    encodeVoteResponse(buffer, resp);
                 }
-                case CorrelatedHeartbeatRequest chr -> {
-                    buf.writeByte(TYPE_HEARTBEAT_REQ);
-                    writeString(buf, chr.id);
-                    buf.writeLong(chr.request.term());
-                    writeString(buf, chr.request.leaderId());
+                case AppendEntriesRequest req -> {
+                    buffer.writeByte(TYPE_APPEND_ENTRIES);
+                    encodeAppendEntries(buffer, req);
                 }
-                case CorrelatedHeartbeatResponse chrsp -> {
-                    buf.writeByte(TYPE_HEARTBEAT_RESP);
-                    writeString(buf, chrsp.id);
-                    buf.writeLong(chrsp.response.term());
-                    buf.writeByte(chrsp.response.success() ? BOOLEAN_TRUE : BOOLEAN_FALSE);
+                case AppendEntriesResponse resp -> {
+                    buffer.writeByte(TYPE_APPEND_RESPONSE);
+                    encodeAppendResponse(buffer, resp);
                 }
-                default -> {
-                    buf.release();
-                    throw new IllegalArgumentException("Unsupported outbound type: " + msg.getClass());
-                }
+                default -> throw new SerializationException("Unknown message type: " + msg.getClass());
             }
-            out.add(buf);
-        } catch (Exception e) {
-            buf.release();
-            throw e;
+            out.add(buffer);
+        } catch (Throwable t) {
+            buffer.release();
+            throw t;
         }
     }
 
     @Override
     protected void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) {
-        if (in.readableBytes() < MIN_HEADER_SIZE) throw new CorruptedFrameException("Frame too short: " + in.readableBytes() + " bytes");
+        if (in.readableBytes() < 2) throw new CorruptedFrameException("Not enough data to read header");
+        byte version = in.readByte();
+        if (version != PROTOCOL_VERSION) throw new CorruptedFrameException("Unsupported protocol version: " + version);
         byte type = in.readByte();
-        if (type < TYPE_VOTE_REQ || type > TYPE_HEARTBEAT_RESP) throw new CorruptedFrameException("Unknown message type: " + type);
-        String id = readString(in);
-        if (in.readableBytes() < 8) throw new CorruptedFrameException("Not enough bytes for term field");
-        long term = in.readLong();
-        switch (type) {
-            case TYPE_VOTE_REQ -> {
-                String candidate = readString(in);
-                VoteRequest vr = new VoteRequest(term, candidate);
-                out.add(new MessageEnvelope(id, vr));
+        try {
+            switch (type) {
+                case TYPE_VOTE_REQUEST -> out.add(decodeVoteRequest(in));
+                case TYPE_VOTE_RESPONSE -> out.add(decodeVoteResponse(in));
+                case TYPE_APPEND_ENTRIES -> out.add(decodeAppendEntries(in));
+                case TYPE_APPEND_RESPONSE -> out.add(decodeAppendResponse(in));
+                default -> throw new CorruptedFrameException("Unknown message type: " + type);
             }
-            case TYPE_VOTE_RESP -> {
-                if (in.readableBytes() < 1) throw new CorruptedFrameException("Not enough bytes for voteGranted field");
-                boolean granted = in.readByte() == BOOLEAN_TRUE;
-                out.add(new MessageEnvelope(id, new VoteResponse(term, granted)));
-            }
-            case TYPE_HEARTBEAT_REQ -> {
-                String leaderId = readString(in);
-                HeartbeatRequest hr = new HeartbeatRequest(term, leaderId);
-                out.add(new MessageEnvelope(id, hr));
-            }
-            case TYPE_HEARTBEAT_RESP -> {
-                if (in.readableBytes() < 1) throw new CorruptedFrameException("Not enough bytes for success field");
-                boolean success = in.readByte() == BOOLEAN_TRUE;
-                out.add(new MessageEnvelope(id, new HeartbeatResponse(term, success)));
-            }
-            default -> throw new CorruptedFrameException("Unknown type: " + type);
+        } catch (IndexOutOfBoundsException | IllegalArgumentException ex) {
+            throw new CorruptedFrameException("Failed to decode message: " + ex.getMessage(), ex);
         }
     }
 
-    private static void writeString(ByteBuf buf, String s) {
-        if (s == null) {
+    private void encodeVoteRequest(ByteBuf buf, VoteRequest req) {
+        buf.writeLong(req.term());
+        writeString(buf, req.candidateId());
+        buf.writeLong(req.lastLogIndex());
+        buf.writeLong(req.lastLogTerm());
+    }
+
+    private VoteRequest decodeVoteRequest(ByteBuf buf) {
+        ensureReadable(buf, Long.BYTES);
+        long term = buf.readLong();
+        String candidateId = readString(buf);
+        ensureReadable(buf, Long.BYTES * 2);
+        long lastLogIndex = buf.readLong();
+        long lastLogTerm = buf.readLong();
+        return new VoteRequest(term, candidateId, lastLogIndex, lastLogTerm);
+    }
+
+    private void encodeVoteResponse(ByteBuf buf, VoteResponse resp) {
+        buf.writeLong(resp.term());
+        buf.writeBoolean(resp.voteGranted());
+    }
+
+    private VoteResponse decodeVoteResponse(ByteBuf buf) {
+        ensureReadable(buf, Long.BYTES + 1);
+        long term = buf.readLong();
+        boolean granted = buf.readBoolean();
+        return new VoteResponse(term, granted);
+    }
+
+    private void encodeAppendEntries(ByteBuf buf, AppendEntriesRequest req) {
+        buf.writeLong(req.term());
+        writeString(buf, req.leaderId());
+        buf.writeLong(req.prevLogIndex());
+        buf.writeLong(req.prevLogTerm());
+        buf.writeLong(req.leaderCommit());
+
+        List<LogEntry> entries = req.entries();
+        if (entries == null) entries = List.of();
+        if (entries.size() > MAX_ENTRIES) throw new SerializationException("Too many entries: " + entries.size());
+        buf.writeInt(entries.size());
+        for (LogEntry entry : entries) {
+            buf.writeLong(entry.index());
+            buf.writeLong(entry.term());
+            int ordinal = entry.command().type().ordinal();
+            buf.writeByte((byte) ordinal);
+            writeStringWithLimit(buf, entry.command().key(), MAX_ENTRY_KEY_LEN);
+            writeNullableStringWithLimit(buf, entry.command().value(), MAX_ENTRY_VALUE_LEN);
+        }
+    }
+
+    private AppendEntriesRequest decodeAppendEntries(ByteBuf buf) {
+        ensureReadable(buf, Long.BYTES * 4); // term + prevLogIndex + prevLogTerm + leaderCommit (plus leaderId size later)
+        long term = buf.readLong();
+        String leaderId = readString(buf);
+        ensureReadable(buf, Long.BYTES * 3);
+        long prevLogIndex = buf.readLong();
+        long prevLogTerm = buf.readLong();
+        long leaderCommit = buf.readLong();
+        ensureReadable(buf, Integer.BYTES);
+        int size = buf.readInt();
+        if (size < 0 || size > MAX_ENTRIES) throw new CorruptedFrameException("Invalid entries count: " + size);
+
+        List<LogEntry> entries = new ArrayList<>(size);
+        for (int i = 0; i < size; i++) {
+            ensureReadable(buf, Long.BYTES * 2 + 1 + Integer.BYTES);
+            long index = buf.readLong();
+            long entryTerm = buf.readLong();
+            int cmdOrdinal = buf.readUnsignedByte();
+            if (cmdOrdinal < 0 || cmdOrdinal >= Command.Type.values().length) throw new CorruptedFrameException("Invalid command type ordinal: " + cmdOrdinal);
+            String key = readString(buf);
+            if (key.length() > MAX_ENTRY_KEY_LEN) throw new CorruptedFrameException("Key too long");
+            String value = readNullableString(buf);
+            if (value != null && value.length() > MAX_ENTRY_VALUE_LEN) throw new CorruptedFrameException("Value too long");
+            Command.Type type = Command.Type.values()[cmdOrdinal];
+            Command cmd = new Command(type, key, value);
+            entries.add(new LogEntry(index, entryTerm, cmd));
+        }
+        return new AppendEntriesRequest(term, leaderId, prevLogIndex, prevLogTerm, entries, leaderCommit);
+    }
+
+    private void encodeAppendResponse(ByteBuf buf, AppendEntriesResponse resp) {
+        buf.writeLong(resp.term());
+        buf.writeBoolean(resp.success());
+        buf.writeLong(resp.matchIndex());
+    }
+
+    private AppendEntriesResponse decodeAppendResponse(ByteBuf buf) {
+        ensureReadable(buf, Long.BYTES + 1 + Long.BYTES);
+        long term = buf.readLong();
+        boolean success = buf.readBoolean();
+        long matchIndex = buf.readLong();
+        return new AppendEntriesResponse(term, success, matchIndex);
+    }
+
+    private void writeString(ByteBuf buf, String str) {
+        if (str == null) throw new SerializationException("String cannot be null here");
+        byte[] bytes = str.getBytes(StandardCharsets.UTF_8);
+        if (bytes.length > MAX_STRING_LENGTH) throw new SerializationException("String too long: " + bytes.length);
+        buf.writeInt(bytes.length);
+        buf.writeBytes(bytes);
+    }
+
+    private void writeStringWithLimit(ByteBuf buf, String str, int maxLen) {
+        if (str == null) throw new SerializationException("String cannot be null here");
+        byte[] bytes = str.getBytes(StandardCharsets.UTF_8);
+        if (bytes.length > maxLen) throw new SerializationException("String too long: " + bytes.length);
+        buf.writeInt(bytes.length);
+        buf.writeBytes(bytes);
+    }
+
+    private String readString(ByteBuf buf) {
+        int len = buf.readInt();
+        if (len < 0 || len > MAX_STRING_LENGTH) throw new CorruptedFrameException("Invalid string length: " + len);
+        ensureReadable(buf, len);
+        byte[] bytes = new byte[len];
+        buf.readBytes(bytes);
+        return new String(bytes, StandardCharsets.UTF_8);
+    }
+
+    private void writeNullableStringWithLimit(ByteBuf buf, String str, int maxLen) {
+        if (str == null) {
             buf.writeInt(-1);
             return;
         }
-        byte[] b = s.getBytes(StandardCharsets.UTF_8);
-        if (b.length > MAX_STRING_LENGTH) throw new IllegalArgumentException("String too long: " + b.length + " bytes");
-        buf.writeInt(b.length);
-        buf.writeBytes(b);
+        writeStringWithLimit(buf, str, maxLen);
     }
 
-    private static String readString(ByteBuf buf) {
-        if (buf.readableBytes() < 4) throw new CorruptedFrameException("Not enough bytes for string length");
+    private String readNullableString(ByteBuf buf) {
         int len = buf.readInt();
-        if (len < 0) return null;
-        if (len > MAX_STRING_LENGTH) throw new CorruptedFrameException("String too long: " + len + " bytes");
-        if (buf.readableBytes() < len) throw new CorruptedFrameException("Not enough bytes for string content: expected " + len + ", available " + buf.readableBytes());
-        byte[] b = new byte[len];
-        buf.readBytes(b);
-        return new String(b, StandardCharsets.UTF_8);
+        if (len == -1) return null;
+        if (len < 0 || len > MAX_STRING_LENGTH) throw new CorruptedFrameException("Invalid string length: " + len);
+        ensureReadable(buf, len);
+        byte[] bytes = new byte[len];
+        buf.readBytes(bytes);
+        return new String(bytes, StandardCharsets.UTF_8);
     }
 
-    public record CorrelatedVoteRequest(String id, VoteRequest request) {
-    }
-
-    public record CorrelatedVoteResponse(String id, VoteResponse response) {
-    }
-
-    public record CorrelatedHeartbeatRequest(String id, HeartbeatRequest request) {
-    }
-
-    public record CorrelatedHeartbeatResponse(String id, HeartbeatResponse response) {
+    private static void ensureReadable(ByteBuf buf, int need) {
+        if (buf.readableBytes() < need) throw new CorruptedFrameException("Not enough bytes: need=" + need + " available=" + buf.readableBytes());
     }
 }
