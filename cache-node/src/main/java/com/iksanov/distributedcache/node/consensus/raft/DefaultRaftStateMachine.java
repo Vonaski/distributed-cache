@@ -3,12 +3,12 @@ package com.iksanov.distributedcache.node.consensus.raft;
 import com.iksanov.distributedcache.node.core.CacheStore;
 import com.iksanov.distributedcache.node.consensus.model.Command;
 import com.iksanov.distributedcache.node.consensus.model.LogEntry;
+import com.iksanov.distributedcache.node.metrics.RaftMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Consumer;
 
 /**
  * Default RaftStateMachine implementation that applies LogEntry -> Command to a provided CacheStore.
@@ -27,25 +27,22 @@ import java.util.function.Consumer;
  */
 public class DefaultRaftStateMachine implements RaftStateMachine {
 
-    private static final Logger logger = LoggerFactory.getLogger(DefaultRaftStateMachine.class);
+    private static final Logger log = LoggerFactory.getLogger(DefaultRaftStateMachine.class);
     private final CacheStore store;
-    private final Consumer<LogEntry> applyCallback;
+    private final RaftMetrics metrics;
     private final AtomicLong lastAppliedIndex = new AtomicLong(0);
 
-    public DefaultRaftStateMachine(CacheStore store) {
-        this(store, null);
-    }
-
-    public DefaultRaftStateMachine(CacheStore store, Consumer<LogEntry> applyCallback) {
+    public DefaultRaftStateMachine(CacheStore store, RaftMetrics metrics) {
         this.store = Objects.requireNonNull(store, "store");
-        this.applyCallback = applyCallback;
+        this.metrics = Objects.requireNonNull(metrics, "metrics");
+        log.info("DefaultRaftStateMachine initialized for store={} with metrics enabled", store.getClass().getSimpleName());
     }
 
     @Override
     public void apply(LogEntry entry) {
         Objects.requireNonNull(entry, "entry");
         if (entry.command() == null) {
-            logger.warn("Applying entry {} with null command — skipping", entry.index());
+            log.warn("Applying entry {} with null command — skipping", entry.index());
             lastAppliedIndex.set(entry.index());
             return;
         }
@@ -55,47 +52,47 @@ public class DefaultRaftStateMachine implements RaftStateMachine {
             switch (cmd.type()) {
                 case SET -> {
                     store.put(cmd.key(), cmd.value());
-                    logger.debug("Applied SET key='{}' index={}", cmd.key(), entry.index());
+                    log.debug("Applied SET key='{}' index={}", cmd.key(), entry.index());
                 }
                 case DELETE -> {
                     store.delete(cmd.key());
-                    logger.debug("Applied DELETE key='{}' index={}", cmd.key(), entry.index());
+                    log.debug("Applied DELETE key='{}' index={}", cmd.key(), entry.index());
                 }
-                default -> logger.warn("Unknown command type {} in entry {}", cmd.type(), entry);
+                default -> log.warn("Unknown command type {} in entry {}", cmd.type(), entry);
             }
             lastAppliedIndex.set(entry.index());
-
-            if (applyCallback != null) {
-                try {
-                    applyCallback.accept(entry);
-                } catch (Throwable t) {
-                    logger.error("applyCallback threw for entry {}: {}", entry.index(), t.getMessage(), t);
-                }
-            }
-        } catch (Throwable t) {
-            logger.error("Failed to apply entry {}: {}", entry.index(), t.getMessage(), t);
-            throw t;
+            metrics.incrementCommandsApplied();
+            metrics.setLastApplied(getLastAppliedIndex());
+        } catch (Exception e) {
+            metrics.incrementCommandsFailed();
+            log.error("Failed to apply command type={} key={} index={} term={}: {}", cmd.type(), cmd.key(), entry.index(), entry.term(), e.getMessage(), e);
         }
     }
 
-    public long getLastAppliedIndex() {
-        return lastAppliedIndex.get();
-    }
-
+    @Override
     public String get(String key) {
         return store.get(key);
     }
-
+    @Override
+    public long getLastAppliedIndex() {
+        return lastAppliedIndex.get();
+    }
+    @Override
     public int size() {
         return store.size();
     }
 
-    public void restoreSnapshot(Map<String, String> snapshot) {
-        Objects.requireNonNull(snapshot, "snapshot");
-        store.clear();
-        for (Map.Entry<String, String> e : snapshot.entrySet()) {
-            store.put(e.getKey(), e.getValue());
-        }
-        logger.info("State machine restored snapshot with {} keys", snapshot.size());
+    @Override
+    public Map<String, String> createSnapshot() {
+        Map<String, String> snapshot = store.exportData();
+        log.info("Created snapshot with {} entries at lastAppliedIndex={}", snapshot.size(), lastAppliedIndex.get());
+        return snapshot;
+    }
+
+    @Override
+    public void restoreSnapshot(Map<String, String> snapshotData) {
+        Objects.requireNonNull(snapshotData, "snapshotData");
+        store.importData(snapshotData);
+        log.info("Restored snapshot with {} entries", snapshotData.size());
     }
 }

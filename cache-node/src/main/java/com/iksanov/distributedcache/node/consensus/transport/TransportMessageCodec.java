@@ -11,54 +11,46 @@ import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.CorruptedFrameException;
 import io.netty.handler.codec.MessageToMessageCodec;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-public final class RaftMessageCodec extends MessageToMessageCodec<ByteBuf, Object> {
+/**
+ * Unified codec for TransportMessage envelope with embedded RPC payload.
+ * Combines envelope encoding (type, from, to, correlationId) with RPC encoding (VoteRequest, etc.).
+ */
+public class TransportMessageCodec extends MessageToMessageCodec<ByteBuf, TransportMessage> {
+    private static final Logger log = LoggerFactory.getLogger(TransportMessageCodec.class);
 
     private static final byte PROTOCOL_VERSION = 1;
-    private static final byte TYPE_VOTE_REQUEST = 1;
-    private static final byte TYPE_VOTE_RESPONSE = 2;
-    private static final byte TYPE_APPEND_ENTRIES = 3;
-    private static final byte TYPE_APPEND_RESPONSE = 4;
+    private static final byte RPC_VOTE_REQUEST = 1;
+    private static final byte RPC_VOTE_RESPONSE = 2;
+    private static final byte RPC_APPEND_ENTRIES = 3;
+    private static final byte RPC_APPEND_RESPONSE = 4;
 
     private static final int MAX_STRING_LENGTH = 10_000;
-    private static final int MAX_PAYLOAD = 5 * 1024 * 1024;
     private static final int MAX_ENTRIES = 10_000;
     private static final int MAX_ENTRY_KEY_LEN = 1024;
     private static final int MAX_ENTRY_VALUE_LEN = 64 * 1024;
 
     @Override
-    protected void encode(ChannelHandlerContext ctx, Object msg, List<Object> out) {
+    protected void encode(ChannelHandlerContext ctx, TransportMessage msg, List<Object> out) {
         Objects.requireNonNull(msg, "msg");
-        ByteBuf buffer = ctx.alloc().buffer();
-        buffer.writeByte(PROTOCOL_VERSION);
+        ByteBuf buf = ctx.alloc().buffer();
 
         try {
-            switch (msg) {
-                case VoteRequest req -> {
-                    buffer.writeByte(TYPE_VOTE_REQUEST);
-                    encodeVoteRequest(buffer, req);
-                }
-                case VoteResponse resp -> {
-                    buffer.writeByte(TYPE_VOTE_RESPONSE);
-                    encodeVoteResponse(buffer, resp);
-                }
-                case AppendEntriesRequest req -> {
-                    buffer.writeByte(TYPE_APPEND_ENTRIES);
-                    encodeAppendEntries(buffer, req);
-                }
-                case AppendEntriesResponse resp -> {
-                    buffer.writeByte(TYPE_APPEND_RESPONSE);
-                    encodeAppendResponse(buffer, resp);
-                }
-                default -> throw new SerializationException("Unknown message type: " + msg.getClass());
-            }
-            out.add(buffer);
+            buf.writeByte(PROTOCOL_VERSION);
+            buf.writeByte(msg.type().ordinal());
+            writeString(buf, msg.from());
+            writeString(buf, msg.to());
+            buf.writeLong(msg.correlationId());
+            encodeRpc(buf, msg.payload());
+            out.add(buf);
         } catch (Throwable t) {
-            buffer.release();
+            buf.release();
             throw t;
         }
     }
@@ -68,17 +60,56 @@ public final class RaftMessageCodec extends MessageToMessageCodec<ByteBuf, Objec
         if (in.readableBytes() < 2) throw new CorruptedFrameException("Not enough data to read header");
         byte version = in.readByte();
         if (version != PROTOCOL_VERSION) throw new CorruptedFrameException("Unsupported protocol version: " + version);
-        byte type = in.readByte();
-        try {
-            switch (type) {
-                case TYPE_VOTE_REQUEST -> out.add(decodeVoteRequest(in));
-                case TYPE_VOTE_RESPONSE -> out.add(decodeVoteResponse(in));
-                case TYPE_APPEND_ENTRIES -> out.add(decodeAppendEntries(in));
-                case TYPE_APPEND_RESPONSE -> out.add(decodeAppendResponse(in));
-                default -> throw new CorruptedFrameException("Unknown message type: " + type);
+        int typeOrdinal = in.readUnsignedByte();
+        if (typeOrdinal < 0 || typeOrdinal >= MessageType.values().length) throw new CorruptedFrameException("Invalid message type ordinal: " + typeOrdinal);
+        MessageType type = MessageType.values()[typeOrdinal];
+        String from = readString(in);
+        String to = readString(in);
+        long correlationId = in.readLong();
+        Object payload = decodeRpc(in);
+        TransportMessage msg = new TransportMessage(type, from, to, correlationId, payload);
+        out.add(msg);
+    }
+
+    private void encodeRpc(ByteBuf buf, Object rpc) {
+        switch (rpc) {
+            case VoteRequest req -> {
+                buf.writeByte(RPC_VOTE_REQUEST);
+                encodeVoteRequest(buf, req);
             }
+            case VoteResponse resp -> {
+                buf.writeByte(RPC_VOTE_RESPONSE);
+                encodeVoteResponse(buf, resp);
+            }
+            case AppendEntriesRequest req -> {
+                buf.writeByte(RPC_APPEND_ENTRIES);
+                encodeAppendEntries(buf, req);
+            }
+            case AppendEntriesResponse resp -> {
+                buf.writeByte(RPC_APPEND_RESPONSE);
+                encodeAppendResponse(buf, resp);
+            }
+            default -> throw new SerializationException("Unknown RPC type: " + rpc.getClass());
+        }
+    }
+
+    private Object decodeRpc(ByteBuf buf) {
+        if (buf.readableBytes() < 1) {
+            throw new CorruptedFrameException("Not enough data to read RPC type");
+        }
+
+        byte rpcType = buf.readByte();
+
+        try {
+            return switch (rpcType) {
+                case RPC_VOTE_REQUEST -> decodeVoteRequest(buf);
+                case RPC_VOTE_RESPONSE -> decodeVoteResponse(buf);
+                case RPC_APPEND_ENTRIES -> decodeAppendEntries(buf);
+                case RPC_APPEND_RESPONSE -> decodeAppendResponse(buf);
+                default -> throw new CorruptedFrameException("Unknown RPC type: " + rpcType);
+            };
         } catch (IndexOutOfBoundsException | IllegalArgumentException ex) {
-            throw new CorruptedFrameException("Failed to decode message: " + ex.getMessage(), ex);
+            throw new CorruptedFrameException("Failed to decode RPC: " + ex.getMessage(), ex);
         }
     }
 
@@ -120,7 +151,10 @@ public final class RaftMessageCodec extends MessageToMessageCodec<ByteBuf, Objec
 
         List<LogEntry> entries = req.entries();
         if (entries == null) entries = List.of();
-        if (entries.size() > MAX_ENTRIES) throw new SerializationException("Too many entries: " + entries.size());
+        if (entries.size() > MAX_ENTRIES) {
+            throw new SerializationException("Too many entries: " + entries.size());
+        }
+
         buf.writeInt(entries.size());
         for (LogEntry entry : entries) {
             buf.writeLong(entry.index());
@@ -133,7 +167,7 @@ public final class RaftMessageCodec extends MessageToMessageCodec<ByteBuf, Objec
     }
 
     private AppendEntriesRequest decodeAppendEntries(ByteBuf buf) {
-        ensureReadable(buf, Long.BYTES * 4); // term + prevLogIndex + prevLogTerm + leaderCommit (plus leaderId size later)
+        ensureReadable(buf, Long.BYTES * 4);
         long term = buf.readLong();
         String leaderId = readString(buf);
         ensureReadable(buf, Long.BYTES * 3);
@@ -142,7 +176,9 @@ public final class RaftMessageCodec extends MessageToMessageCodec<ByteBuf, Objec
         long leaderCommit = buf.readLong();
         ensureReadable(buf, Integer.BYTES);
         int size = buf.readInt();
-        if (size < 0 || size > MAX_ENTRIES) throw new CorruptedFrameException("Invalid entries count: " + size);
+        if (size < 0 || size > MAX_ENTRIES) {
+            throw new CorruptedFrameException("Invalid entries count: " + size);
+        }
 
         List<LogEntry> entries = new ArrayList<>(size);
         for (int i = 0; i < size; i++) {
@@ -150,11 +186,17 @@ public final class RaftMessageCodec extends MessageToMessageCodec<ByteBuf, Objec
             long index = buf.readLong();
             long entryTerm = buf.readLong();
             int cmdOrdinal = buf.readUnsignedByte();
-            if (cmdOrdinal < 0 || cmdOrdinal >= Command.Type.values().length) throw new CorruptedFrameException("Invalid command type ordinal: " + cmdOrdinal);
+            if (cmdOrdinal < 0 || cmdOrdinal >= Command.Type.values().length) {
+                throw new CorruptedFrameException("Invalid command type ordinal: " + cmdOrdinal);
+            }
             String key = readString(buf);
-            if (key.length() > MAX_ENTRY_KEY_LEN) throw new CorruptedFrameException("Key too long");
+            if (key.length() > MAX_ENTRY_KEY_LEN) {
+                throw new CorruptedFrameException("Key too long");
+            }
             String value = readNullableString(buf);
-            if (value != null && value.length() > MAX_ENTRY_VALUE_LEN) throw new CorruptedFrameException("Value too long");
+            if (value != null && value.length() > MAX_ENTRY_VALUE_LEN) {
+                throw new CorruptedFrameException("Value too long");
+            }
             Command.Type type = Command.Type.values()[cmdOrdinal];
             Command cmd = new Command(type, key, value);
             entries.add(new LogEntry(index, entryTerm, cmd));
@@ -177,24 +219,34 @@ public final class RaftMessageCodec extends MessageToMessageCodec<ByteBuf, Objec
     }
 
     private void writeString(ByteBuf buf, String str) {
-        if (str == null) throw new SerializationException("String cannot be null here");
+        if (str == null) {
+            throw new SerializationException("String cannot be null here");
+        }
         byte[] bytes = str.getBytes(StandardCharsets.UTF_8);
-        if (bytes.length > MAX_STRING_LENGTH) throw new SerializationException("String too long: " + bytes.length);
+        if (bytes.length > MAX_STRING_LENGTH) {
+            throw new SerializationException("String too long: " + bytes.length);
+        }
         buf.writeInt(bytes.length);
         buf.writeBytes(bytes);
     }
 
     private void writeStringWithLimit(ByteBuf buf, String str, int maxLen) {
-        if (str == null) throw new SerializationException("String cannot be null here");
+        if (str == null) {
+            throw new SerializationException("String cannot be null here");
+        }
         byte[] bytes = str.getBytes(StandardCharsets.UTF_8);
-        if (bytes.length > maxLen) throw new SerializationException("String too long: " + bytes.length);
+        if (bytes.length > maxLen) {
+            throw new SerializationException("String too long: " + bytes.length);
+        }
         buf.writeInt(bytes.length);
         buf.writeBytes(bytes);
     }
 
     private String readString(ByteBuf buf) {
         int len = buf.readInt();
-        if (len < 0 || len > MAX_STRING_LENGTH) throw new CorruptedFrameException("Invalid string length: " + len);
+        if (len < 0 || len > MAX_STRING_LENGTH) {
+            throw new CorruptedFrameException("Invalid string length: " + len);
+        }
         ensureReadable(buf, len);
         byte[] bytes = new byte[len];
         buf.readBytes(bytes);
@@ -212,7 +264,9 @@ public final class RaftMessageCodec extends MessageToMessageCodec<ByteBuf, Objec
     private String readNullableString(ByteBuf buf) {
         int len = buf.readInt();
         if (len == -1) return null;
-        if (len < 0 || len > MAX_STRING_LENGTH) throw new CorruptedFrameException("Invalid string length: " + len);
+        if (len < 0 || len > MAX_STRING_LENGTH) {
+            throw new CorruptedFrameException("Invalid string length: " + len);
+        }
         ensureReadable(buf, len);
         byte[] bytes = new byte[len];
         buf.readBytes(bytes);
@@ -220,6 +274,8 @@ public final class RaftMessageCodec extends MessageToMessageCodec<ByteBuf, Objec
     }
 
     private static void ensureReadable(ByteBuf buf, int need) {
-        if (buf.readableBytes() < need) throw new CorruptedFrameException("Not enough bytes: need=" + need + " available=" + buf.readableBytes());
+        if (buf.readableBytes() < need) {
+            throw new CorruptedFrameException("Not enough bytes: need=" + need + " available=" + buf.readableBytes());
+        }
     }
 }

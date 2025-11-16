@@ -1,6 +1,5 @@
-package com.iksanov.distributedcache.common.cluster.sharding;
+package com.iksanov.distributedcache.common.cluster;
 
-import com.iksanov.distributedcache.common.cluster.NodeInfo;
 import com.iksanov.distributedcache.common.util.HashUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

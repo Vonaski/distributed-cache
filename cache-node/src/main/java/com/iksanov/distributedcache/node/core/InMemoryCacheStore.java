@@ -123,6 +123,47 @@ public class InMemoryCacheStore implements CacheStore {
         return store.size();
     }
 
+    @Override
+    public Map<String, String> exportData() {
+        Map<String, String> data = new HashMap<>();
+        long now = System.currentTimeMillis();
+
+        for (Map.Entry<String, CacheEntry> entry : store.entrySet()) {
+            CacheEntry cacheEntry = entry.getValue();
+            // Only export non-expired entries
+            if (cacheEntry != null && !cacheEntry.isExpired()) {
+                data.put(entry.getKey(), cacheEntry.value);
+            }
+        }
+
+        log.info("Exported {} entries from cache (total size: {})", data.size(), store.size());
+        return data;
+    }
+
+    @Override
+    public void importData(Map<String, String> data) {
+        if (data == null || data.isEmpty()) {
+            log.info("No data to import");
+            return;
+        }
+
+        evictionLock.lock();
+        try {
+            store.clear();
+            long expireAt = defaultTtlMillis > 0 ? System.currentTimeMillis() + defaultTtlMillis : -1;
+
+            for (Map.Entry<String, String> entry : data.entrySet()) {
+                CacheEntry cacheEntry = new CacheEntry(entry.getKey(), entry.getValue(), expireAt);
+                store.put(entry.getKey(), cacheEntry);
+            }
+
+            metrics.updateSize(store.size());
+            log.info("Imported {} entries into cache", data.size());
+        } finally {
+            evictionLock.unlock();
+        }
+    }
+
     public void shutdown() {
         clear();
         log.info("Cache shutdown");

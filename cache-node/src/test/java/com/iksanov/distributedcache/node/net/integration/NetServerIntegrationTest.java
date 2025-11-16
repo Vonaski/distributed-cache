@@ -4,8 +4,11 @@ import com.iksanov.distributedcache.common.codec.CacheMessageCodec;
 import com.iksanov.distributedcache.common.dto.CacheRequest;
 import com.iksanov.distributedcache.common.dto.CacheResponse;
 import com.iksanov.distributedcache.node.config.NetServerConfig;
+import com.iksanov.distributedcache.node.consensus.model.Command;
+import com.iksanov.distributedcache.node.consensus.raft.RaftNode;
+import com.iksanov.distributedcache.node.consensus.raft.RaftStateMachine;
+import com.iksanov.distributedcache.node.consensus.sharding.ShardManager;
 import com.iksanov.distributedcache.node.core.InMemoryCacheStore;
-import com.iksanov.distributedcache.node.metrics.CacheMetrics;
 import com.iksanov.distributedcache.node.metrics.NetMetrics;
 import com.iksanov.distributedcache.node.net.NetServer;
 import io.netty.bootstrap.Bootstrap;
@@ -16,12 +19,13 @@ import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
 import io.netty.handler.codec.LengthFieldPrepender;
 import org.junit.jupiter.api.*;
-
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.*;
-
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
 
 /**
  * Integration tests for {@link NetServer}.
@@ -36,16 +40,48 @@ public class NetServerIntegrationTest {
 
     private static final String HOST = "127.0.0.1";
     private static final int PORT = 7001;
+    private static final String SHARD_ID = "shard-0";
     private NetServer server;
     private NioEventLoopGroup clientGroup;
     private Bootstrap clientBootstrap;
     private final Map<String, CompletableFuture<CacheResponse>> responseMap = new ConcurrentHashMap<>();
-    private final CacheMetrics cacheMetrics = new CacheMetrics();
     private final NetMetrics netMetrics = new NetMetrics();
+
+    // Test storage - simulates committed state
+    private final Map<String, String> testStorage = new ConcurrentHashMap<>();
+    private ShardManager mockShardManager;
+    private RaftNode mockRaftNode;
+    private RaftStateMachine mockStateMachine;
 
     @BeforeAll
     void setUp() {
-        InMemoryCacheStore store = new InMemoryCacheStore(10_000, 60_000, 5_000, cacheMetrics);
+        // Create mock ShardManager
+        mockShardManager = mock(ShardManager.class);
+        mockRaftNode = mock(RaftNode.class);
+        mockStateMachine = mock(RaftStateMachine.class);
+
+        // ShardManager always returns the same shard for any key
+        when(mockShardManager.selectShardForKey(any())).thenReturn(SHARD_ID);
+        when(mockShardManager.getShard(SHARD_ID)).thenReturn(mockRaftNode);
+        when(mockShardManager.getStateMachine(SHARD_ID)).thenReturn(mockStateMachine);
+        when(mockShardManager.localShardIds()).thenReturn(Set.of(SHARD_ID));
+
+        // Mock RaftNode.submit() to immediately commit and store the command
+        when(mockRaftNode.submit(any(Command.class))).thenAnswer(invocation -> {
+            Command cmd = invocation.getArgument(0);
+            if (cmd.type() == Command.Type.SET) {
+                testStorage.put(cmd.key(), cmd.value());
+            } else if (cmd.type() == Command.Type.DELETE) {
+                testStorage.remove(cmd.key());
+            }
+            return CompletableFuture.completedFuture(1L);
+        });
+
+        // Mock RaftStateMachine.get() to read from test storage
+        when(mockStateMachine.get(any())).thenAnswer(invocation -> {
+            String key = invocation.getArgument(0);
+            return testStorage.get(key);
+        });
 
         NetServerConfig config = new NetServerConfig(
                 HOST,
@@ -55,14 +91,28 @@ public class NetServerIntegrationTest {
                 128,
                 10 * 1024 * 1024,
                 2,
-                10
+                10,
+                100L,
+                10L
         );
 
-        server = new NetServer(config, store, null, netMetrics);
+        server = new NetServer(config, mockShardManager, netMetrics);
         server.start();
+
+        // Give server time to start
+        try {
+            Thread.sleep(500);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
 
         clientGroup = new NioEventLoopGroup();
         clientBootstrap = createClientBootstrap(clientGroup);
+    }
+
+    @BeforeEach
+    void clearStorage() {
+        testStorage.clear();
     }
 
     @AfterAll

@@ -6,7 +6,6 @@ import com.iksanov.distributedcache.node.core.CacheStore;
 import com.iksanov.distributedcache.node.metrics.NetMetrics;
 import com.iksanov.distributedcache.node.net.NetConnectionHandler;
 import com.iksanov.distributedcache.node.net.RequestProcessor;
-import com.iksanov.distributedcache.node.replication.ReplicationManager;
 import io.netty.channel.embedded.EmbeddedChannel;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -43,7 +42,6 @@ class NetConnectionHandlerStressTest {
         CacheStore store = mock(CacheStore.class);
         NetMetrics metrics = mock(NetMetrics.class);
         RequestProcessor processor = mock(RequestProcessor.class);
-        ReplicationManager replicationManager = mock(ReplicationManager.class);
         when(store.get(anyString())).thenReturn("v");
         doNothing().when(store).put(anyString(), anyString());
         doNothing().when(store).delete(anyString());
