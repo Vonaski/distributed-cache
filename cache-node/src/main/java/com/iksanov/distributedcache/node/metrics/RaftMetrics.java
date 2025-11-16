@@ -209,6 +209,51 @@ public class RaftMetrics {
         commandsFailed.increment();
     }
 
+    // Getter methods for testing and monitoring
+    public long getCurrentTerm() {
+        return currentTerm.get();
+    }
+
+    public long getCommitIndex() {
+        return commitIndex.get();
+    }
+
+    public long getLastApplied() {
+        return lastApplied.get();
+    }
+
+    public long getLogSize() {
+        return logSize.get();
+    }
+
+    public long getNodeState() {
+        return nodeState.get();
+    }
+
+    public double getCommandsReplicated() {
+        return commandsReplicated.count();
+    }
+
+    public double getCommandsApplied() {
+        return commandsApplied.count();
+    }
+
+    public double getCommandsFailed() {
+        return commandsFailed.count();
+    }
+
+    public double getElectionsStarted() {
+        return electionsStarted.count();
+    }
+
+    public double getElectionsWon() {
+        return electionsWon.count();
+    }
+
+    public double getElectionsFailed() {
+        return electionsFailed.count();
+    }
+
     public String scrape() {
         return registry.scrape();
     }

@@ -1,7 +1,7 @@
 package com.iksanov.distributedcache.proxy.cluster;
 
 import com.iksanov.distributedcache.common.cluster.NodeInfo;
-import com.iksanov.distributedcache.common.cluster.sharding.ConsistentHashRing;
+import com.iksanov.distributedcache.common.cluster.ConsistentHashRing;
 import com.iksanov.distributedcache.proxy.config.CacheClusterConfig;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;

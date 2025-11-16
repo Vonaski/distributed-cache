@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <includeContext>true</includeContext>
+            <includeMdc>true</includeMdc>
+        </encoder>
+    </appender>
+
+    <!-- No LOKI appender for tests - it causes connection errors -->
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+    <!-- Application-specific loggers -->
+    <logger name="com.iksanov.distributedcache.node.net" level="DEBUG"/>
+    <logger name="com.iksanov.distributedcache.node.consensus.raft.RaftNode" level="DEBUG"/>
+    <logger name="com.iksanov.distributedcache.node.consensus.raft.DefaultRaftStateMachine" level="INFO"/>
+    <logger name="com.iksanov.distributedcache.node.consensus.persistence" level="INFO"/>
+
+    <!-- Enable transport logging to debug connection issues -->
+    <logger name="com.iksanov.distributedcache.node.consensus.transport.NettyRaftTransport" level="WARN"/>
+
+    <logger name="com.iksanov.distributedcache.node.core" level="DEBUG"/>
+    <logger name="com.iksanov.distributedcache.node.replication" level="DEBUG"/>
+    <logger name="com.iksanov.distributedcache.common" level="INFO"/>
+
+    <!-- Reduce Netty noise -->
+    <logger name="io.netty" level="WARN"/>
+
+    <!-- Suppress Loki4j errors if somehow loaded -->
+    <logger name="com.github.loki4j" level="OFF"/>
+</configuration>

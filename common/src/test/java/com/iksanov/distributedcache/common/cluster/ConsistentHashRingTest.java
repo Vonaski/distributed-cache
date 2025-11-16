@@ -1,6 +1,5 @@
-package com.iksanov.distributedcache.common.cluster.sharding;
+package com.iksanov.distributedcache.common.cluster;
 
-import com.iksanov.distributedcache.common.cluster.NodeInfo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

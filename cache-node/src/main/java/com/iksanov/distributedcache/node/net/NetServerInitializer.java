@@ -1,9 +1,9 @@
 package com.iksanov.distributedcache.node.net;
 
 import com.iksanov.distributedcache.common.codec.CacheMessageCodec;
-import com.iksanov.distributedcache.node.core.CacheStore;
+import com.iksanov.distributedcache.node.config.NetServerConfig;
+import com.iksanov.distributedcache.node.consensus.sharding.ShardManager;
 import com.iksanov.distributedcache.node.metrics.NetMetrics;
-import com.iksanov.distributedcache.node.replication.ReplicationManager;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.socket.SocketChannel;
@@ -22,15 +22,13 @@ import io.netty.handler.logging.LoggingHandler;
  *  - business logic handler (NetConnectionHandler)
  */
 public class NetServerInitializer extends ChannelInitializer<SocketChannel> {
-    private final CacheStore store;
-    private final int maxFrameLength;
-    private final ReplicationManager replicationManager;
+    private final ShardManager shardManager;
+    private final NetServerConfig config;
     private final NetMetrics metrics;
 
-    public NetServerInitializer(CacheStore store, int maxFrameLength, ReplicationManager replicationManager, NetMetrics metrics) {
-        this.store = store;
-        this.maxFrameLength = maxFrameLength;
-        this.replicationManager = replicationManager;
+    public NetServerInitializer(ShardManager shardManager, NetServerConfig config, NetMetrics metrics) {
+        this.shardManager = shardManager;
+        this.config = config;
         this.metrics = metrics;
     }
 
@@ -39,9 +37,9 @@ public class NetServerInitializer extends ChannelInitializer<SocketChannel> {
         ChannelPipeline p = ch.pipeline();
         p.addLast(new ChannelLifecycleHandler(metrics));
         p.addLast(new LoggingHandler(LogLevel.DEBUG));
-        p.addLast(new LengthFieldBasedFrameDecoder(maxFrameLength, 0, 4, 0, 4));
+        p.addLast(new LengthFieldBasedFrameDecoder(config.maxFrameLength(), 0, 4, 0, 4));
         p.addLast(new LengthFieldPrepender(4));
         p.addLast(new CacheMessageCodec());
-        p.addLast(new NetConnectionHandler(new RequestProcessor(store, replicationManager, metrics), metrics));
+        p.addLast(new NetConnectionHandler(new RequestProcessor(shardManager, metrics, config), metrics));
     }
 }

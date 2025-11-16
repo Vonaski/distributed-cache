@@ -1,9 +1,8 @@
 package com.iksanov.distributedcache.node.net;
 
 import com.iksanov.distributedcache.node.config.NetServerConfig;
-import com.iksanov.distributedcache.node.core.CacheStore;
+import com.iksanov.distributedcache.node.consensus.sharding.ShardManager;
 import com.iksanov.distributedcache.node.metrics.NetMetrics;
-import com.iksanov.distributedcache.node.replication.ReplicationManager;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.PooledByteBufAllocator;
 import io.netty.channel.*;
@@ -29,18 +28,16 @@ public final class NetServer {
 
     private static final Logger log = LoggerFactory.getLogger(NetServer.class);
     private final NetServerConfig config;
-    private final CacheStore store;
-    private final ReplicationManager replicationManager;
+    private final ShardManager shardManager;
     private final NetMetrics metrics;
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
     private Channel serverChannel;
     private volatile boolean running = false;
 
-    public NetServer(NetServerConfig config, CacheStore store, ReplicationManager replicationManager, NetMetrics netMetrics) {
+    public NetServer(NetServerConfig config, ShardManager shardManager, NetMetrics netMetrics) {
         this.config = Objects.requireNonNull(config, "config");
-        this.store = Objects.requireNonNull(store, "store");
-        this.replicationManager = replicationManager;
+        this.shardManager = Objects.requireNonNull(shardManager, "shardManager");
         this.metrics = Objects.requireNonNull(netMetrics, "netMetrics");
     }
 
@@ -62,7 +59,7 @@ public final class NetServer {
                     .option(ChannelOption.ALLOCATOR, PooledByteBufAllocator.DEFAULT)
                     .childOption(ChannelOption.ALLOCATOR, PooledByteBufAllocator.DEFAULT)
                     .handler(new LoggingHandler(LogLevel.INFO))
-                    .childHandler(new NetServerInitializer(store, config.maxFrameLength(), replicationManager, metrics));
+                    .childHandler(new NetServerInitializer(shardManager, config, metrics));
 
             InetSocketAddress address = new InetSocketAddress(config.host(), config.port());
             log.info("Starting NetServer on {}:{} with config: {}", config.host(), config.port(), config);
@@ -95,9 +92,7 @@ public final class NetServer {
 
         log.info("Stopping NetServer on {}:{}", config.host(), config.port());
         try {
-            if (serverChannel != null) {
-                serverChannel.close().syncUninterruptibly();
-            }
+            if (serverChannel != null) serverChannel.close().syncUninterruptibly();
         } catch (Exception e) {
             metrics.incrementErrors();
             log.error("Error closing NetServer channel: {}", e.getMessage(), e);
