@@ -2,6 +2,7 @@ package com.iksanov.distributedcache.node.net;
 
 import com.iksanov.distributedcache.common.dto.CacheRequest;
 import com.iksanov.distributedcache.common.dto.CacheResponse;
+import com.iksanov.distributedcache.node.config.ApplicationConfig.NodeRole;
 import com.iksanov.distributedcache.node.core.CacheStore;
 import com.iksanov.distributedcache.node.metrics.NetMetrics;
 import com.iksanov.distributedcache.node.replication.ReplicationManager;
@@ -46,7 +47,7 @@ class NetConnectionHandlerTest {
 
     @BeforeEach
     void setUp() {
-        processor = new RequestProcessor(store, replicationManager, metrics);
+        processor = new RequestProcessor(store, replicationManager, NodeRole.MASTER, metrics, null);
         handler = new NetConnectionHandler(processor, metrics);
     }
 

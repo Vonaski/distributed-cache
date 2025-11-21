@@ -2,6 +2,7 @@ package com.iksanov.distributedcache.node.net;
 
 import com.iksanov.distributedcache.common.codec.CacheMessageCodec;
 import com.iksanov.distributedcache.common.dto.CacheResponse;
+import com.iksanov.distributedcache.node.config.ApplicationConfig;
 import com.iksanov.distributedcache.node.core.CacheStore;
 import com.iksanov.distributedcache.node.metrics.NetMetrics;
 import com.iksanov.distributedcache.node.replication.ReplicationManager;
@@ -43,10 +44,12 @@ class NetServerInitializerTest {
     @Mock
     SocketChannel socketChannel;
     private NetServerInitializer initializerWithReplication;
+    private RequestProcessor requestProcessor;
 
     @BeforeEach
     void setUp() {
-        initializerWithReplication = new NetServerInitializer(store, 1024, replicationManager, netMetrics);
+        requestProcessor = new RequestProcessor(store, replicationManager, ApplicationConfig.NodeRole.MASTER, netMetrics, null);
+        initializerWithReplication = new NetServerInitializer(requestProcessor, 1024, netMetrics);
     }
 
     @Test

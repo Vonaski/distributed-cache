@@ -43,7 +43,7 @@ public class CacheService {
                 key,
                 null
         );
-        CacheResponse response = sendWithRetry(key, request);
+        CacheResponse response = sendWithRetry(key, request, true);
         return switch (response.status()) {
             case OK -> response.value();
             case NOT_FOUND -> null;
@@ -61,7 +61,7 @@ public class CacheService {
                 key,
                 value
         );
-        CacheResponse response = sendWithRetry(key, request);
+        CacheResponse response = sendWithRetry(key, request, false);
         if (response.status() == CacheResponse.Status.ERROR) throw new CacheConnectionException("Failed to set key: " + response.errorMessage());
     }
 
@@ -74,11 +74,11 @@ public class CacheService {
                 key,
                 null
         );
-        CacheResponse response = sendWithRetry(key, request);
+        CacheResponse response = sendWithRetry(key, request, false);
         if (response.status() == CacheResponse.Status.ERROR) throw new CacheConnectionException("Failed to delete key: " + response.errorMessage());
     }
 
-    private CacheResponse sendWithRetry(String key, CacheRequest request) {
+    private CacheResponse sendWithRetry(String key, CacheRequest request, boolean isReadOperation) {
         int maxRetries = config.getConnection().getMaxRetries();
         int timeoutMillis = config.getConnection().getTimeoutMillis();
         CacheConnectionException lastException = null;
@@ -88,8 +88,13 @@ public class CacheService {
             metrics.recordRequest();
             for (int attempt = 0; attempt <= maxRetries; attempt++) {
                 try {
-                    NodeInfo node = clusterManager.getNodeForKey(key);
-                    log.debug("Sending {} request for key '{}' to node {} (attempt {}/{})", request.command(), key, node.nodeId(), attempt + 1, maxRetries + 1);
+                    NodeInfo node = isReadOperation ? clusterManager.getNodeForRead(key) : clusterManager.getMasterNodeForKey(key);
+
+                    log.debug("Sending {} request for key '{}' to {} node {} (attempt {}/{})",
+                            request.command(), key,
+                            isReadOperation ? "read" : "master",
+                            node.nodeId(), attempt + 1, maxRetries + 1);
+
                     CompletableFuture<CacheResponse> future = client.sendRequest(node, request);
                     CacheResponse response = future.get(timeoutMillis, TimeUnit.MILLISECONDS);
                     log.debug("Received response for key '{}': status={}", key, response.status());
@@ -102,7 +107,6 @@ public class CacheService {
                     lastException = new CacheConnectionException("Request failed for key: " + key, e);
                     log.warn("Error on attempt {}/{} for key '{}': {}", attempt + 1, maxRetries + 1, key, e.getMessage());
                 }
-
                 if (attempt < maxRetries) {
                     metrics.recordRetry();
                     try {

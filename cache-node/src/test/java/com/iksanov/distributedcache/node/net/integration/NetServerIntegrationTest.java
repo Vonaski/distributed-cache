@@ -58,7 +58,7 @@ public class NetServerIntegrationTest {
                 10
         );
 
-        server = new NetServer(config, store, null, netMetrics);
+        server = new NetServer(config, store, null, com.iksanov.distributedcache.node.config.ApplicationConfig.NodeRole.MASTER, netMetrics, null);
         server.start();
 
         clientGroup = new NioEventLoopGroup();

@@ -1,9 +1,11 @@
 package com.iksanov.distributedcache.node.net;
 
+import com.iksanov.distributedcache.node.config.ApplicationConfig.NodeRole;
 import com.iksanov.distributedcache.node.config.NetServerConfig;
 import com.iksanov.distributedcache.node.core.CacheStore;
 import com.iksanov.distributedcache.node.metrics.NetMetrics;
 import com.iksanov.distributedcache.node.replication.ReplicationManager;
+import com.iksanov.distributedcache.node.replication.failover.FailoverManager;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.PooledByteBufAllocator;
 import io.netty.channel.*;
@@ -31,17 +33,21 @@ public final class NetServer {
     private final NetServerConfig config;
     private final CacheStore store;
     private final ReplicationManager replicationManager;
+    private final NodeRole nodeRole;
     private final NetMetrics metrics;
+    private final RequestProcessor requestProcessor;
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
     private Channel serverChannel;
     private volatile boolean running = false;
 
-    public NetServer(NetServerConfig config, CacheStore store, ReplicationManager replicationManager, NetMetrics netMetrics) {
+    public NetServer(NetServerConfig config, CacheStore store, ReplicationManager replicationManager, NodeRole nodeRole, NetMetrics netMetrics, FailoverManager failoverManager) {
         this.config = Objects.requireNonNull(config, "config");
         this.store = Objects.requireNonNull(store, "store");
         this.replicationManager = replicationManager;
+        this.nodeRole = Objects.requireNonNull(nodeRole, "nodeRole");
         this.metrics = Objects.requireNonNull(netMetrics, "netMetrics");
+        this.requestProcessor = new RequestProcessor(store, replicationManager, nodeRole, metrics, failoverManager);
     }
 
     public void start() {
@@ -62,7 +68,7 @@ public final class NetServer {
                     .option(ChannelOption.ALLOCATOR, PooledByteBufAllocator.DEFAULT)
                     .childOption(ChannelOption.ALLOCATOR, PooledByteBufAllocator.DEFAULT)
                     .handler(new LoggingHandler(LogLevel.INFO))
-                    .childHandler(new NetServerInitializer(store, config.maxFrameLength(), replicationManager, metrics));
+                    .childHandler(new NetServerInitializer(requestProcessor, config.maxFrameLength(), metrics));
 
             InetSocketAddress address = new InetSocketAddress(config.host(), config.port());
             log.info("Starting NetServer on {}:{} with config: {}", config.host(), config.port(), config);
@@ -148,5 +154,13 @@ public final class NetServer {
 
     public boolean isRunning() {
         return running;
+    }
+
+    public void updateRole(NodeRole newRole) {
+        requestProcessor.updateRole(newRole);
+    }
+
+    public RequestProcessor getRequestProcessor() {
+        return requestProcessor;
     }
 }

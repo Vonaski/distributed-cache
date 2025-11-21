@@ -69,10 +69,8 @@ class ChannelLifecycleHandlerTest {
     void multipleHandlersShareSameMetrics() {
         ChannelLifecycleHandler h1 = new ChannelLifecycleHandler(metrics);
         ChannelLifecycleHandler h2 = new ChannelLifecycleHandler(metrics);
-
         h1.channelActive(ctx);
         h2.channelInactive(ctx);
-
         verify(metrics, times(1)).incrementConnections();
         verify(metrics, times(1)).incrementClosedConnections();
     }

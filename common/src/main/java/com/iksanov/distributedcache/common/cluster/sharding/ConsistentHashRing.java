@@ -17,9 +17,7 @@ public class ConsistentHashRing {
     private final int virtualNodeCount;
 
     public ConsistentHashRing(int virtualNodeCount) {
-        if (virtualNodeCount <= 0) {
-            throw new IllegalArgumentException("virtualNodeCount must be > 0");
-        }
+        if (virtualNodeCount <= 0) throw new IllegalArgumentException("virtualNodeCount must be > 0");
         this.virtualNodeCount = virtualNodeCount;
     }
 
@@ -44,16 +42,17 @@ public class ConsistentHashRing {
         log.debug("Added node {} with {} virtual nodes", nodeId, virtualNodeCount);
     }
 
-    public synchronized void removeNode(NodeInfo node) {
+    public synchronized boolean removeNode(NodeInfo node) {
         Objects.requireNonNull(node, "node is null");
         String nodeId = node.nodeId();
         List<Integer> hashes = nodeToHashes.remove(nodeId);
         if (hashes == null) {
             log.warn("Node {} not found in ring", nodeId);
-            return;
+            return false;
         }
         for (int h : hashes) ring.remove(h);
         log.debug("Removed node {} ({} virtual nodes)", nodeId, hashes.size());
+        return false;
     }
 
     public NodeInfo getNodeForKey(String key) {

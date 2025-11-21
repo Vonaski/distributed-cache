@@ -69,16 +69,12 @@ class NetConnectionHandlerStressTest {
                         );
                         channel.writeInbound(req);
                     }
-
-                    // Ensure pipeline processed all messages
                     channel.finish();
-
                     Object msg;
                     while ((msg = channel.readOutbound()) != null) {
                         assertInstanceOf(CacheResponse.class, msg);
                         responses++;
                     }
-
                 } finally {
                     latch.countDown();
                     channel.finishAndReleaseAll();
@@ -87,28 +83,18 @@ class NetConnectionHandlerStressTest {
             }));
         }
 
-        // Wait for all threads to finish (adaptive timeout)
         long timeoutSec = Math.max(30, REQUEST_COUNT / 300);
         boolean finished = latch.await(timeoutSec, TimeUnit.SECONDS);
-
         pool.shutdown();
         long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-
-        // Compute totals
         int totalResponses = 0;
         for (Future<Integer> f : results) {
             totalResponses += f.get();
         }
-
-        System.out.printf("✅ Processed %d requests across %d threads in %d ms%n",
-                REQUEST_COUNT, THREADS, elapsedMs);
-
-        // Assertions
+        System.out.printf("Processed %d requests across %d threads in %d ms%n", REQUEST_COUNT, THREADS, elapsedMs);
         assertTrue(finished, "All threads must complete within timeout (" + timeoutSec + "s)");
-        assertEquals(REQUEST_COUNT, totalResponses,
-                "Total outbound responses must equal inbound requests");
-
+        assertEquals(REQUEST_COUNT, totalResponses, "Total outbound responses must equal inbound requests");
         double throughput = REQUEST_COUNT / (elapsedMs / 1000.0);
-        System.out.printf("📊 Throughput: %.2f req/s%n", throughput);
+        System.out.printf("Throughput: %.2f req/s%n", throughput);
     }
 }

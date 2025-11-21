@@ -22,17 +22,21 @@ public class MetricsServer {
     private static final Logger log = LoggerFactory.getLogger(MetricsServer.class);
     private final int port;
     private final CacheMetrics cacheMetrics;
-    private final RaftMetrics raftMetrics;
     private final NetMetrics netMetrics;
+    private final ReplicationMetrics replicationMetrics;
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
     private Channel serverChannel;
 
-    public MetricsServer(int port, CacheMetrics metrics, RaftMetrics raftMetrics, NetMetrics netMetrics) {
+    public MetricsServer(int port, CacheMetrics metrics, NetMetrics netMetrics) {
+        this(port, metrics, netMetrics, null);
+    }
+
+    public MetricsServer(int port, CacheMetrics metrics, NetMetrics netMetrics, ReplicationMetrics replicationMetrics) {
         this.port = port;
         this.cacheMetrics = metrics;
-        this.raftMetrics = raftMetrics;
         this.netMetrics = netMetrics;
+        this.replicationMetrics = replicationMetrics;
     }
 
     public void start() {
@@ -48,7 +52,7 @@ public class MetricsServer {
                             ch.pipeline()
                                     .addLast(new HttpServerCodec())
                                     .addLast(new HttpObjectAggregator(1024 * 1024))
-                                    .addLast(new MetricsHandler(cacheMetrics, raftMetrics, netMetrics));
+                                    .addLast(new MetricsHandler(cacheMetrics, netMetrics, replicationMetrics));
                         }
                     })
                     .option(ChannelOption.SO_BACKLOG, 128)
@@ -71,15 +75,15 @@ public class MetricsServer {
     }
 
     private static class MetricsHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
-        
-        private final CacheMetrics cacheMetrics;
-        private final RaftMetrics raftMetrics;
-        private final NetMetrics netMetrics;
 
-        MetricsHandler(CacheMetrics cacheMetrics,  RaftMetrics raftMetrics, NetMetrics netMetrics) {
+        private final CacheMetrics cacheMetrics;
+        private final NetMetrics netMetrics;
+        private final ReplicationMetrics replicationMetrics;
+
+        MetricsHandler(CacheMetrics cacheMetrics, NetMetrics netMetrics, ReplicationMetrics replicationMetrics) {
             this.cacheMetrics = cacheMetrics;
-            this.raftMetrics = raftMetrics;
             this.netMetrics = netMetrics;
+            this.replicationMetrics = replicationMetrics;
         }
 
         @Override
@@ -95,9 +99,14 @@ public class MetricsServer {
         }
 
         private void handleMetrics(ChannelHandlerContext ctx) {
-            String metricsData = cacheMetrics.scrape() + "\n"
-                    + raftMetrics.scrape() + "\n"
-                    + netMetrics.scrape();
+            StringBuilder metricsBuilder = new StringBuilder();
+            metricsBuilder.append(cacheMetrics.scrape()).append("\n");
+            metricsBuilder.append(netMetrics.scrape()).append("\n");
+            if (replicationMetrics != null) {
+                metricsBuilder.append(replicationMetrics.scrape());
+            }
+
+            String metricsData = metricsBuilder.toString();
             FullHttpResponse response = new DefaultFullHttpResponse(
                     HttpVersion.HTTP_1_1,
                     HttpResponseStatus.OK,

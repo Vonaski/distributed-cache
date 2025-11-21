@@ -1,6 +1,7 @@
 package com.iksanov.distributedcache.node.net;
 
 import com.iksanov.distributedcache.common.codec.CacheMessageCodec;
+import com.iksanov.distributedcache.node.config.ApplicationConfig.NodeRole;
 import com.iksanov.distributedcache.node.core.CacheStore;
 import com.iksanov.distributedcache.node.metrics.NetMetrics;
 import com.iksanov.distributedcache.node.replication.ReplicationManager;
@@ -22,15 +23,13 @@ import io.netty.handler.logging.LoggingHandler;
  *  - business logic handler (NetConnectionHandler)
  */
 public class NetServerInitializer extends ChannelInitializer<SocketChannel> {
-    private final CacheStore store;
+    private final RequestProcessor requestProcessor;
     private final int maxFrameLength;
-    private final ReplicationManager replicationManager;
     private final NetMetrics metrics;
 
-    public NetServerInitializer(CacheStore store, int maxFrameLength, ReplicationManager replicationManager, NetMetrics metrics) {
-        this.store = store;
+    public NetServerInitializer(RequestProcessor requestProcessor, int maxFrameLength, NetMetrics metrics) {
+        this.requestProcessor = requestProcessor;
         this.maxFrameLength = maxFrameLength;
-        this.replicationManager = replicationManager;
         this.metrics = metrics;
     }
 
@@ -42,6 +41,6 @@ public class NetServerInitializer extends ChannelInitializer<SocketChannel> {
         p.addLast(new LengthFieldBasedFrameDecoder(maxFrameLength, 0, 4, 0, 4));
         p.addLast(new LengthFieldPrepender(4));
         p.addLast(new CacheMessageCodec());
-        p.addLast(new NetConnectionHandler(new RequestProcessor(store, replicationManager, metrics), metrics));
+        p.addLast(new NetConnectionHandler(requestProcessor, metrics));
     }
 }

@@ -14,6 +14,7 @@ import java.util.List;
 
 public final class CacheMessageCodec extends MessageToMessageCodec<ByteBuf, Object> {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(CacheMessageCodec.class);
     private static final byte PROTOCOL_VERSION = 1;
     private static final byte TYPE_REQUEST = 0;
     private static final byte TYPE_RESPONSE = 1;
@@ -21,31 +22,51 @@ public final class CacheMessageCodec extends MessageToMessageCodec<ByteBuf, Obje
 
     @Override
     protected void encode(ChannelHandlerContext ctx, Object msg, List<Object> out) {
-        ByteBuf buffer = ctx.alloc().buffer();
-        buffer.writeByte(PROTOCOL_VERSION);
-        if (msg instanceof CacheRequest request) {
-            buffer.writeByte(TYPE_REQUEST);
-            encodeRequest(buffer, request);
-        } else if (msg instanceof CacheResponse response) {
-            buffer.writeByte(TYPE_RESPONSE);
-            encodeResponse(buffer, response);
-        } else {
-            throw new SerializationException("Unsupported message type: " + msg.getClass());
+        try {
+            ByteBuf buffer = ctx.alloc().buffer();
+            buffer.writeByte(PROTOCOL_VERSION);
+            if (msg instanceof CacheRequest request) {
+                buffer.writeByte(TYPE_REQUEST);
+                encodeRequest(buffer, request);
+                log.debug("Encoded request: {}", request.requestId());
+            } else if (msg instanceof CacheResponse response) {
+                buffer.writeByte(TYPE_RESPONSE);
+                encodeResponse(buffer, response);
+                log.debug("Encoded response: {}", response.requestId());
+            } else {
+                throw new SerializationException("Unsupported message type: " + msg.getClass());
+            }
+            out.add(buffer);
+        } catch (Exception e) {
+            log.error("Encode error", e);
+            throw e;
         }
-        out.add(buffer);
     }
 
     @Override
     protected void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) {
-        if (in.readableBytes() < 2) throw new CorruptedFrameException("Not enough data to read header");
-        byte version = in.readByte();
-        if (version != PROTOCOL_VERSION) throw new CorruptedFrameException("Unsupported protocol version: " + version);
+        try {
+            if (in.readableBytes() < 2) throw new CorruptedFrameException("Not enough data to read header");
+            byte version = in.readByte();
+            if (version != PROTOCOL_VERSION) throw new CorruptedFrameException("Unsupported protocol version: " + version);
 
-        byte messageType = in.readByte();
-        switch (messageType) {
-            case TYPE_REQUEST -> out.add(decodeRequest(in));
-            case TYPE_RESPONSE -> out.add(decodeResponse(in));
-            default -> throw new CorruptedFrameException("Unknown message type: " + messageType);
+            byte messageType = in.readByte();
+            switch (messageType) {
+                case TYPE_REQUEST -> {
+                    CacheRequest req = decodeRequest(in);
+                    log.debug("Decoded request: {}", req.requestId());
+                    out.add(req);
+                }
+                case TYPE_RESPONSE -> {
+                    CacheResponse resp = decodeResponse(in);
+                    log.debug("Decoded response: {}", resp.requestId());
+                    out.add(resp);
+                }
+                default -> throw new CorruptedFrameException("Unknown message type: " + messageType);
+            }
+        } catch (Exception e) {
+            log.error("Decode error", e);
+            throw e;
         }
     }
 
@@ -53,7 +74,7 @@ public final class CacheMessageCodec extends MessageToMessageCodec<ByteBuf, Obje
         writeString(buffer, request.requestId());
         buffer.writeLong(request.timestamp());
         buffer.writeByte((byte) request.command().ordinal());
-        writeString(buffer, request.key());
+        writeNullableString(buffer, request.key());
         writeNullableString(buffer, request.value());
     }
 
@@ -62,6 +83,7 @@ public final class CacheMessageCodec extends MessageToMessageCodec<ByteBuf, Obje
         writeNullableString(buffer, response.value());
         buffer.writeByte((byte) response.status().ordinal());
         writeNullableString(buffer, response.errorMessage());
+        writeNullableString(buffer, response.metadata());
     }
 
     private CacheRequest decodeRequest(ByteBuf in) {
@@ -69,7 +91,7 @@ public final class CacheMessageCodec extends MessageToMessageCodec<ByteBuf, Obje
         long timestamp = readLongSafe(in);
         int commandOrdinal = readByteSafe(in);
         CacheRequest.Command command = safeCommandFromOrdinal(commandOrdinal);
-        String key = readString(in);
+        String key = readNullableString(in);
         String value = readNullableString(in);
         return new CacheRequest(requestId, timestamp, command, key, value);
     }
@@ -80,7 +102,8 @@ public final class CacheMessageCodec extends MessageToMessageCodec<ByteBuf, Obje
         int statusOrdinal = readByteSafe(in);
         CacheResponse.Status status = safeStatusFromOrdinal(statusOrdinal);
         String error = readNullableString(in);
-        return new CacheResponse(requestId, value, status, error);
+        String metadata = readNullableString(in);
+        return new CacheResponse(requestId, value, status, error, metadata);
     }
 
     private void writeString(ByteBuf buffer, String s) {
@@ -117,32 +140,24 @@ public final class CacheMessageCodec extends MessageToMessageCodec<ByteBuf, Obje
     }
 
     private int readByteSafe(ByteBuf in) {
-        if (in.readableBytes() < 1) {
-            throw new CorruptedFrameException("Unexpected end of frame when reading byte");
-        }
+        if (in.readableBytes() < 1) throw new CorruptedFrameException("Unexpected end of frame when reading byte");
         return in.readByte();
     }
 
     private long readLongSafe(ByteBuf in) {
-        if (in.readableBytes() < Long.BYTES) {
-            throw new CorruptedFrameException("Unexpected end of frame when reading long");
-        }
+        if (in.readableBytes() < Long.BYTES) throw new CorruptedFrameException("Unexpected end of frame when reading long");
         return in.readLong();
     }
 
     private CacheRequest.Command safeCommandFromOrdinal(int ordinal) {
         CacheRequest.Command[] values = CacheRequest.Command.values();
-        if (ordinal < 0 || ordinal >= values.length) {
-            throw new InvalidCacheRequestException("Invalid command ordinal: " + ordinal);
-        }
+        if (ordinal < 0 || ordinal >= values.length) throw new InvalidCacheRequestException("Invalid command ordinal: " + ordinal);
         return values[ordinal];
     }
 
     private CacheResponse.Status safeStatusFromOrdinal(int ordinal) {
         CacheResponse.Status[] values = CacheResponse.Status.values();
-        if (ordinal < 0 || ordinal >= values.length) {
-            throw new InvalidCacheRequestException("Invalid status ordinal: " + ordinal);
-        }
+        if (ordinal < 0 || ordinal >= values.length) throw new InvalidCacheRequestException("Invalid status ordinal: " + ordinal);
         return values[ordinal];
     }
 }

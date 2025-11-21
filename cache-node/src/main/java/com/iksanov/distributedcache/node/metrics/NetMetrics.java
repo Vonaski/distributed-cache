@@ -68,7 +68,7 @@ public class NetMetrics {
                 .description("Current number of active TCP connections")
                 .register(registry);
 
-        log.info("✅ NetMetrics initialized and Prometheus registry created");
+        log.info("[SUCCESS] NetMetrics initialized and Prometheus registry created");
     }
 
     public void incrementConnections() { totalConnections.increment(); activeConnections.incrementAndGet(); }

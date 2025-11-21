@@ -27,6 +27,10 @@ public class InMemoryCacheStore implements CacheStore {
     private final AtomicInteger putCounter = new AtomicInteger();
     private static final int LAZY_CLEANUP_INTERVAL = 100;
 
+    public InMemoryCacheStore(int maxSize, long defaultTtlMillis, long cleanupIntervalMillis) {
+        this(maxSize, defaultTtlMillis, cleanupIntervalMillis, new CacheMetrics());
+    }
+
     public InMemoryCacheStore(int maxSize, long defaultTtlMillis, long cleanupIntervalMillis, CacheMetrics metrics) {
         if (maxSize <= 0) throw new CacheException("maxSize must be > 0");
         this.maxSize = maxSize;
@@ -188,21 +192,14 @@ public class InMemoryCacheStore implements CacheStore {
     private void lazyCleanupExpired() {
         int cleaned = 0;
         int maxChecks = Math.min(20, store.size() / 10);
-
         Iterator<Map.Entry<String, CacheEntry>> iterator = store.entrySet().iterator();
         for (int i = 0; i < maxChecks && iterator.hasNext(); i++) {
             Map.Entry<String, CacheEntry> entry = iterator.next();
             CacheEntry cacheEntry = entry.getValue();
-
             if (cacheEntry != null && cacheEntry.isExpired()) {
-                if (store.remove(entry.getKey(), cacheEntry)) {
-                    cleaned++;
-                }
+                if (store.remove(entry.getKey(), cacheEntry)) cleaned++;
             }
         }
-
-        if (cleaned > 0) {
-            log.debug("Lazy cleanup removed {} expired entries", cleaned);
-        }
+        if (cleaned > 0) log.debug("Lazy cleanup removed {} expired entries", cleaned);
     }
 }

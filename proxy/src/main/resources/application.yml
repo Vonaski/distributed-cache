@@ -7,7 +7,7 @@ spring:
 
 cache:
   cluster:
-    nodes: ${CACHE_NODES:node-1:cache-node-1:9001,node-2:cache-node-2:9002,node-3:cache-node-3:9003}
+    nodes: ${CACHE_NODES:master-1:localhost:7000:7100,master-2:localhost:7001:7101,master-3:localhost:7002:7102}
     virtual-nodes: ${CACHE_VIRTUAL_NODES:150}
     connection:
       timeout-millis: ${CACHE_TIMEOUT_MS:3000}

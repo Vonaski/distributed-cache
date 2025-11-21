@@ -76,7 +76,7 @@ public class InMemoryCacheStoreStressTest {
         assertTrue(finalSize <= allowedMaxSize, "Final size " + finalSize + " should be reasonable");
 
         double throughput = totalOps.get() / (elapsedMs / 1000.0);
-        System.out.printf("✅ High concurrency test: %,d ops in %d ms (%.0f ops/sec)%n", totalOps.get(), elapsedMs, throughput);
+        System.out.printf("High concurrency test: %,d ops in %d ms (%.0f ops/sec)%n", totalOps.get(), elapsedMs, throughput);
         System.out.printf("Max observed size: %d, Final size: %d (limit: %d)%n", maxObservedSize.get(), finalSize, maxSize);
         Thread.sleep(ttlMillis * 2 + 200);
         int sizeAfterExpiry = store.size();
@@ -120,7 +120,7 @@ public class InMemoryCacheStoreStressTest {
         assertTrue(finalSize <= allowedMaxSize, "Final size " + finalSize + " must be reasonable");
         long totalOps = (long) threads * operations;
         double throughput = totalOps / (elapsedMs / 1000.0);
-        System.out.printf("✅ Extreme load test: %,d ops in %d ms (%.0f ops/sec)%n", totalOps, elapsedMs, throughput);
+        System.out.printf("Extreme load test: %,d ops in %d ms (%.0f ops/sec)%n", totalOps, elapsedMs, throughput);
         System.out.printf("Max observed size: %d, Final size: %d (limit: %d)%n", maxObservedSize.get(), finalSize, maxSize);
         store.shutdown();
     }
@@ -178,7 +178,7 @@ public class InMemoryCacheStoreStressTest {
         assertTrue(finalSize <= allowedMax, "Final size must respect limit");
         assertTrue(maxObservedSize.get() <= allowedMax, "Max size should not wildly exceed limit: " + maxObservedSize.get());
         double hitRate = getHits.get() * 100.0 / (getHits.get() + getMisses.get());
-        System.out.printf("✅ Mixed workload: Final size=%d, Max observed=%d%n", finalSize, maxObservedSize.get());
+        System.out.printf("Mixed workload: Final size=%d, Max observed=%d%n", finalSize, maxObservedSize.get());
         System.out.printf("Cache hit rate: %.2f%% (hits=%d, misses=%d)%n", hitRate, getHits.get(), getMisses.get());
         store.shutdown();
     }

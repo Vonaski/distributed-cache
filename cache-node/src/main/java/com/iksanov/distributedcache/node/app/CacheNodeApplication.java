@@ -2,14 +2,14 @@ package com.iksanov.distributedcache.node.app;
 
 import com.iksanov.distributedcache.common.cluster.NodeInfo;
 import com.iksanov.distributedcache.common.cluster.ReplicaManager;
-import com.iksanov.distributedcache.common.cluster.sharding.ConsistentHashRing;
 import com.iksanov.distributedcache.node.config.ApplicationConfig;
 import com.iksanov.distributedcache.node.config.ApplicationConfig.NodeRole;
 import com.iksanov.distributedcache.node.core.InMemoryCacheStore;
+import com.iksanov.distributedcache.node.replication.failover.FailoverManager;
 import com.iksanov.distributedcache.node.metrics.CacheMetrics;
 import com.iksanov.distributedcache.node.metrics.MetricsServer;
 import com.iksanov.distributedcache.node.metrics.NetMetrics;
-import com.iksanov.distributedcache.node.metrics.RaftMetrics;
+import com.iksanov.distributedcache.node.metrics.ReplicationMetrics;
 import com.iksanov.distributedcache.node.net.NetServer;
 import com.iksanov.distributedcache.node.replication.ReplicationManager;
 import com.iksanov.distributedcache.node.replication.ReplicationReceiver;
@@ -32,11 +32,12 @@ public class CacheNodeApplication {
     private ReplicationManager replicationManager;
     private ReplicationReceiver replicationReceiver;
     private ReplicationSender replicationSender;
+    private FailoverManager failoverManager;
     private final CountDownLatch shutdownLatch = new CountDownLatch(1);
     private CacheMetrics cacheMetrics;
-    private RaftMetrics raftMetrics;
     private MetricsServer metricsServer;
     private NetMetrics netMetrics;
+    private ReplicationMetrics replicationMetrics;
 
     public CacheNodeApplication(ApplicationConfig config) {
         this.config = config;
@@ -58,32 +59,32 @@ public class CacheNodeApplication {
     public void start() {
         try {
             cacheMetrics = new CacheMetrics();
-            raftMetrics = new RaftMetrics();
             netMetrics = new NetMetrics();
-            log.info("✓ Metrics initialized");
+            replicationMetrics = new ReplicationMetrics();
+            log.info("[OK] Metrics initialized");
 
             cache = new InMemoryCacheStore(config.cacheMaxSize(), config.cacheTtlMillis(), 5000, cacheMetrics);
-            log.info("✓ Cache initialized (size={})", config.cacheMaxSize());
+            log.info("[OK] Cache initialized (size={})", config.cacheMaxSize());
 
-            metricsServer = new MetricsServer(8081, cacheMetrics, raftMetrics, netMetrics);
+            metricsServer = new MetricsServer(8081, cacheMetrics, netMetrics, replicationMetrics);
             metricsServer.start();
-            log.info("✓ Metrics server started on port 8081");
+            log.info("[OK] Metrics server started on port 8081");
 
             if (config.clusterEnabled()) {
                 replicationManager = initCluster();
-                log.info("✓ Cluster mode enabled (role={})", config.role());
+                log.info("[OK] Cluster mode enabled (role={})", config.role());
             }
 
-            netServer = new NetServer(config.toNetServerConfig(), cache, replicationManager, netMetrics);
+            netServer = new NetServer(config.toNetServerConfig(), cache, replicationManager, config.role(), netMetrics, failoverManager);
             netServer.start();
-            log.info("✓ Server listening on {}:{}", config.host(), config.port());
+            log.info("[OK] Server listening on {}:{}", config.host(), config.port());
 
             Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown, "shutdown-hook"));
 
             log.info("========================================");
-            log.info("✅ CacheNode ready!");
-            log.info("   Cache port: {}", config.port());
-            log.info("   Metrics port: 8081");
+            log.info("[SUCCESS] CacheNode ready!");
+            log.info("  Cache port: {}", config.port());
+            log.info("  Metrics port: 8081");
             log.info("========================================");
 
         } catch (Exception e) {
@@ -96,40 +97,30 @@ public class CacheNodeApplication {
     private ReplicationManager initCluster() {
         NodeInfo self = new NodeInfo(config.nodeId(), config.host(), config.port(), config.replicationPort());
 
-        ConsistentHashRing hashRing = new ConsistentHashRing(150);
         ReplicaManager replicaManager = new ReplicaManager();
+        NodeInfo masterNodeForReplica = null;
 
         if (config.role() == NodeRole.MASTER) {
             log.info("Initializing as MASTER node...");
-            hashRing.addNode(self);
-            log.info("  Added self to hash ring: {}", self.nodeId());
+            log.info("Node: {}", self.nodeId());
+
             for (String nodeAddr : config.clusterNodes()) {
                 try {
-                    NodeInfo node = NodeInfo.fromString(nodeAddr);
-                    if (node.nodeId().contains("replica")) {
-                        replicaManager.registerReplica(self, node);
-                        log.info("  Registered replica: {}", node.nodeId());
-                    } else if (node.nodeId().contains("master")) {
-                        hashRing.addNode(node);
-                        log.info("  Added master to hash ring: {}", node.nodeId());
-                    } else {
-                        hashRing.addNode(node);
-                        log.info("  Added node to hash ring: {}", node.nodeId());
-                    }
+                    NodeInfo replica = NodeInfo.fromString(nodeAddr);
+                    replicaManager.registerReplica(self, replica);
+                    log.info("Registered replica: {}", replica.nodeId());
                 } catch (Exception e) {
-                    log.warn("Failed to parse node '{}': {}", nodeAddr, e.getMessage());
+                    log.warn("Failed to parse replica '{}': {}", nodeAddr, e.getMessage());
                 }
             }
 
-            log.info("Hash ring size: {}", hashRing.getNodes().size());
             log.info("Replicas registered: {}", replicaManager.getReplicas(self).size());
         } else {
             log.info("Initializing as REPLICA node...");
             if (!config.clusterNodes().isEmpty()) {
                 try {
-                    NodeInfo master = NodeInfo.fromString(config.clusterNodes().getFirst());
-                    hashRing.addNode(master);
-                    log.info("  Connected to master: {}", master.nodeId());
+                    masterNodeForReplica = NodeInfo.fromString(config.clusterNodes().getFirst());
+                    log.info("  Connected to master: {}", masterNodeForReplica.nodeId());
                 } catch (Exception e) {
                     log.error("Failed to connect to master: {}", e.getMessage());
                 }
@@ -143,25 +134,64 @@ public class CacheNodeApplication {
                 config.replicationPort(),
                 cache,
                 10 * 1024 * 1024,
-                config.nodeId()
+                config.nodeId(),
+                replicationMetrics
         );
 
         replicationReceiver.start();
-        log.info("✓ ReplicationReceiver started on port {}", config.replicationPort());
-        replicationSender = new ReplicationSender(replicaManager);
-        log.info("✓ ReplicationSender initialized");
+        log.info("[OK] ReplicationReceiver started on port {}", config.replicationPort());
+        replicationSender = new ReplicationSender(replicaManager, null, replicationMetrics);
+        log.info("[OK] ReplicationSender initialized");
 
-        return new ReplicationManager(
+        failoverManager = new FailoverManager(
+                config.nodeId(),
+                config.priority(),
+                config.role(),
+                replicationSender,
+                self,
+                masterNodeForReplica
+        );
+
+        failoverManager.setRoleChangeListener((oldRole, newRole, newEpoch) -> {
+            log.info("========================================");
+            log.info("FAILOVER: Role changed {} -> {}", oldRole, newRole);
+            log.info("  New epoch: {}", newEpoch);
+            log.info("========================================");
+
+            if (netServer != null) {
+                netServer.updateRole(newRole);
+                log.info("NetServer role updated to {}", newRole);
+            } else {
+                log.warn("NetServer not initialized, role update will take effect on next startup");
+            }
+        });
+
+        failoverManager.start();
+        log.info("[OK] FailoverManager started");
+
+        ReplicationManager replManager = new ReplicationManager(
                 self,
                 replicationSender,
                 replicationReceiver,
-                key -> {
-                    if (hashRing.getNodeForKey(key) != null) {
-                        return hashRing.getNodeForKey(key);
-                    }
-                    return self;
-                }
+                replicationMetrics
         );
+
+        if (config.role() == NodeRole.REPLICA && config.priority() == 1) {
+            return new ReplicationManager(
+                    self,
+                    replicationSender,
+                    replicationReceiver,
+                    replicationMetrics
+            ) {
+                @Override
+                public void onReplicationReceived(com.iksanov.distributedcache.node.replication.ReplicationTask task) {
+                    super.onReplicationReceived(task);
+                    failoverManager.onReplicationReceived();
+                }
+            };
+        }
+
+        return replManager;
     }
 
     private void shutdown() {
@@ -174,38 +204,44 @@ public class CacheNodeApplication {
                 metricsServer.shutdown();
             }
 
+            if (failoverManager != null) {
+                log.info("Stopping FailoverManager...");
+                failoverManager.stop();
+                log.info("[OK] FailoverManager stopped");
+            }
+
             if (netServer != null) {
                 log.info("Stopping NetServer...");
                 netServer.stop();
-                log.info("✓ NetServer stopped");
+                log.info("[OK] NetServer stopped");
             }
 
             if (replicationManager != null) {
                 log.info("Stopping ReplicationManager...");
                 replicationManager.shutdown();
-                log.info("✓ ReplicationManager stopped");
+                log.info("[OK] ReplicationManager stopped");
             }
 
             if (replicationSender != null) {
                 log.info("Stopping ReplicationSender...");
                 replicationSender.shutdown();
-                log.info("✓ ReplicationSender stopped");
+                log.info("[OK] ReplicationSender stopped");
             }
 
             if (replicationReceiver != null) {
                 log.info("Stopping ReplicationReceiver...");
                 replicationReceiver.stop();
-                log.info("✓ ReplicationReceiver stopped");
+                log.info("[OK] ReplicationReceiver stopped");
             }
 
             if (cache != null) {
                 log.info("Clearing cache...");
                 cache.clear();
-                log.info("✓ Cache cleared");
+                log.info("[OK] Cache cleared");
             }
 
             log.info("========================================");
-            log.info("✅ Shutdown complete");
+            log.info("[SUCCESS] Shutdown complete");
             log.info("========================================");
         } catch (Exception e) {
             log.error("Error during shutdown", e);

@@ -14,6 +14,7 @@ import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
 import io.netty.handler.codec.LengthFieldPrepender;
 import io.netty.handler.timeout.ReadTimeoutHandler;
+import io.netty.util.AttributeKey;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,6 +27,7 @@ import java.util.concurrent.*;
 public class CacheClient {
 
     private static final Logger log = LoggerFactory.getLogger(CacheClient.class);
+    private static final AttributeKey<RequestResponseHandler> HANDLER_KEY = AttributeKey.valueOf("handler");
     private final EventLoopGroup eventLoopGroup;
     private final Bootstrap bootstrap;
     private final CacheClusterConfig config;
@@ -48,15 +50,20 @@ public class CacheClient {
 
     public CompletableFuture<CacheResponse> sendRequest(NodeInfo node, CacheRequest request) {
         CompletableFuture<CacheResponse> future = new CompletableFuture<>();
-        
+
         try {
             Channel channel = getOrCreateChannel(node);
-            channel.pipeline().addLast(new ResponseHandler(request.requestId(), future));
+            RequestResponseHandler handler = channel.attr(HANDLER_KEY).get();
+            if (handler != null) {
+                handler.registerRequest(request.requestId(), future);
+            } else {
+                future.completeExceptionally(new CacheConnectionException("No handler found for channel"));
+                return future;
+            }
+
             channel.writeAndFlush(request).addListener((ChannelFutureListener) writeFuture -> {
                 if (!writeFuture.isSuccess()) {
-                    future.completeExceptionally(
-                        new CacheConnectionException("Failed to write request to " + node.nodeId(), writeFuture.cause())
-                    );
+                    future.completeExceptionally(new CacheConnectionException("Failed to write request to " + node.nodeId(), writeFuture.cause()));
                     removeChannel(node);
                 }
             });
@@ -68,9 +75,7 @@ public class CacheClient {
 
     private Channel getOrCreateChannel(NodeInfo node) {
         Channel channel = connectionPool.get(node);
-        
         if (channel != null && channel.isActive()) return channel;
-        
         synchronized (this) {
             channel = connectionPool.get(node);
             if (channel != null && channel.isActive()) return channel;
@@ -90,16 +95,19 @@ public class CacheClient {
                     .handler(new ChannelInitializer<SocketChannel>() {
                         @Override
                         protected void initChannel(SocketChannel ch) {
+                            RequestResponseHandler handler = new RequestResponseHandler();
+                            ch.attr(HANDLER_KEY).set(handler);
                             ch.pipeline()
                                 .addLast(new LengthFieldBasedFrameDecoder(65536, 0, 4, 0, 4))
                                 .addLast(new LengthFieldPrepender(4))
                                 .addLast(new CacheMessageCodec())
-                                .addLast(new ReadTimeoutHandler(config.getConnection().getTimeoutMillis(), TimeUnit.MILLISECONDS));
+                                .addLast(new ReadTimeoutHandler(config.getConnection().getTimeoutMillis(), TimeUnit.MILLISECONDS))
+                                .addLast(handler);
                         }
                     })
                     .connect(node.host(), node.port())
                     .sync();
-            
+
             if (!future.isSuccess()) throw new CacheConnectionException("Failed to connect to " + node.nodeId(), future.cause());
             log.info("Connected to cache node: {}", node.nodeId());
             return future.channel();
@@ -116,34 +124,42 @@ public class CacheClient {
     @PreDestroy
     public void shutdown() {
         log.info("Shutting down CacheClient...");
-        connectionPool.values().forEach(channel -> {
-            if (channel.isActive()) channel.close();
-        });
+        connectionPool.values().forEach(channel -> {if (channel.isActive()) channel.close();});
         eventLoopGroup.shutdownGracefully();
         log.info("CacheClient shutdown complete");
     }
 
-    private static class ResponseHandler extends SimpleChannelInboundHandler<CacheResponse> {
-        
-        private final String requestId;
-        private final CompletableFuture<CacheResponse> future;
-        ResponseHandler(String requestId, CompletableFuture<CacheResponse> future) {
-            this.requestId = requestId;
-            this.future = future;
+    private static class RequestResponseHandler extends SimpleChannelInboundHandler<CacheResponse> {
+
+        private final Map<String, CompletableFuture<CacheResponse>> pendingRequests = new ConcurrentHashMap<>();
+
+        public void registerRequest(String requestId, CompletableFuture<CacheResponse> future) {
+            pendingRequests.put(requestId, future);
         }
 
         @Override
         protected void channelRead0(ChannelHandlerContext ctx, CacheResponse response) {
-            if (response.requestId().equals(requestId)) {
+            CompletableFuture<CacheResponse> future = pendingRequests.remove(response.requestId());
+            if (future != null) {
                 future.complete(response);
-                ctx.pipeline().remove(this);
+            } else {
+                log.warn("Received response for unknown requestId: {}", response.requestId());
             }
         }
 
         @Override
         public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-            if (!future.isDone()) future.completeExceptionally(cause);
-            ctx.pipeline().remove(this);
+            log.error("Channel exception: {}", cause.getMessage(), cause);
+            pendingRequests.values().forEach(f -> {if (!f.isDone()) f.completeExceptionally(cause);});
+            pendingRequests.clear();
+            ctx.close();
+        }
+
+        @Override
+        public void channelInactive(ChannelHandlerContext ctx) {
+            pendingRequests.values().forEach(f -> {if (!f.isDone()) f.completeExceptionally(new CacheConnectionException("Channel closed"));});
+            pendingRequests.clear();
+            ctx.fireChannelInactive();
         }
     }
 }

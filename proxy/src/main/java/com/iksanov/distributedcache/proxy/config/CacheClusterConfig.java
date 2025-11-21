@@ -8,15 +8,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+@Getter
 @Setter
 @Configuration
 @ConfigurationProperties(prefix = "cache.cluster")
 public class CacheClusterConfig {
 
     private String nodes;
-    @Getter
     private int virtualNodes = 150;
-    @Getter
     private ConnectionConfig connection = new ConnectionConfig();
 
     public List<String> getNodes() {

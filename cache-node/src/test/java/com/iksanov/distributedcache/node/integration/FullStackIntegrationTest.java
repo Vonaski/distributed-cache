@@ -10,7 +10,6 @@ import com.iksanov.distributedcache.node.core.CacheStore;
 import com.iksanov.distributedcache.node.core.InMemoryCacheStore;
 import com.iksanov.distributedcache.node.metrics.CacheMetrics;
 import com.iksanov.distributedcache.node.metrics.NetMetrics;
-import com.iksanov.distributedcache.node.metrics.RaftMetrics;
 import com.iksanov.distributedcache.node.net.NetServer;
 import com.iksanov.distributedcache.node.replication.ReplicationManager;
 import com.iksanov.distributedcache.node.replication.ReplicationReceiver;
@@ -27,7 +26,6 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -67,13 +65,11 @@ class FullStackIntegrationTest {
     private Bootstrap clientBootstrap;
     private Map<String, CompletableFuture<CacheResponse>> pendingResponses;
     private CacheMetrics cacheMetrics;
-    private RaftMetrics raftMetrics;
-    private ReplicationMetrics replicationMetrics;
     private NetMetrics netMetrics;
 
     @BeforeAll
     void setupCluster() throws Exception {
-        System.out.println("🚀 Setting up 3-node cluster for E2E test...");
+        System.out.println("Setting up 3-node cluster for E2E test...");
 
         masterNode = new NodeInfo("master", HOST, 9100, 9200);
         replicaNode1 = new NodeInfo("replica-1", HOST, 9101, 9201);
@@ -83,8 +79,6 @@ class FullStackIntegrationTest {
         stores = new ConcurrentHashMap<>();
         netServers = new ConcurrentHashMap<>();
         cacheMetrics = new CacheMetrics();
-        raftMetrics = new RaftMetrics();
-        replicationMetrics = new ReplicationMetrics();
         netMetrics = new NetMetrics();
         replicationManagers = new ConcurrentHashMap<>();
         senders = new ConcurrentHashMap<>();
@@ -94,11 +88,10 @@ class FullStackIntegrationTest {
         replicaManager.registerReplica(masterNode, replicaNode1);
         replicaManager.registerReplica(masterNode, replicaNode2);
 
-        Function<String, NodeInfo> primaryResolver = key -> masterNode;
         NioEventLoopGroup sharedReplicationGroup = new NioEventLoopGroup(4);
 
         for (NodeInfo node : allNodes) {
-            System.out.println("  📦 Starting node: " + node.nodeId());
+            System.out.println("Starting node: " + node.nodeId());
 
             CacheStore store = new InMemoryCacheStore(10000, 0, 1000, cacheMetrics);
             stores.put(node.nodeId(), store);
@@ -123,33 +116,33 @@ class FullStackIntegrationTest {
                     node,
                     sender,
                     receiver,
-                    primaryResolver
+                    null
             );
             replicationManagers.put(node.nodeId(), replManager);
 
             NetServerConfig config = new NetServerConfig(
                     node.host(),
                     node.port(),
-                    2,  // boss threads
-                    4,  // worker threads
-                    128,  // backlog
-                    1024 * 1024,  // max frame length
-                    5,  // read timeout
-                    30  // write timeout
+                    2,
+                    4,
+                    128,
+                    1024 * 1024,
+                    5,
+                    30
             );
-            NetServer netServer = new NetServer(config, store, replManager, netMetrics);
+            NetServer netServer = new NetServer(config, store, replManager, com.iksanov.distributedcache.node.config.ApplicationConfig.NodeRole.MASTER, netMetrics, null);
             netServer.start();
             netServers.put(node.nodeId(), netServer);
-            System.out.println("    ✅ Node " + node.nodeId() + " started on port " + node.port());
+            System.out.println("Node " + node.nodeId() + " started on port " + node.port());
         }
         Thread.sleep(1000);
         setupClient();
-        System.out.println("✅ Cluster ready!\n");
+        System.out.println("Cluster ready!\n");
     }
 
     @AfterAll
     void tearDownCluster() throws Exception {
-        System.out.println("\n🛑 Shutting down cluster...");
+        System.out.println("\nShutting down cluster...");
 
         if (clientEventLoopGroup != null) clientEventLoopGroup.shutdownGracefully().await(2, TimeUnit.SECONDS);
 
@@ -179,7 +172,7 @@ class FullStackIntegrationTest {
                 }
             }
         }
-        System.out.println("✅ Cluster shutdown complete\n");
+        System.out.println("Cluster shutdown complete\n");
     }
 
     private void setupClient() {
@@ -191,8 +184,7 @@ class FullStackIntegrationTest {
                     @Override
                     protected void initChannel(SocketChannel ch) {
                         ChannelPipeline p = ch.pipeline();
-                        p.addLast("frameDecoder", new LengthFieldBasedFrameDecoder(
-                                1024 * 1024, 0, 4, 0, 4));
+                        p.addLast("frameDecoder", new LengthFieldBasedFrameDecoder(1024 * 1024, 0, 4, 0, 4));
                         p.addLast("frameEncoder", new LengthFieldPrepender(4));
                         p.addLast("codec", new CacheMessageCodec());
                         p.addLast("handler", new SimpleChannelInboundHandler<CacheResponse>() {
@@ -249,7 +241,7 @@ class FullStackIntegrationTest {
     @Test
     @DisplayName("E2E: Client SET → Master → Replicas (full replication)")
     void testFullStackSetReplication() throws Exception {
-        System.out.println("\n🧪 TEST: Full stack SET replication");
+        System.out.println("\nTEST: Full stack SET replication");
         String key = "user:123";
         String value = "John Doe";
         System.out.println("  1️⃣ Client sends SET to master...");
@@ -263,25 +255,25 @@ class FullStackIntegrationTest {
 
         CacheResponse response = sendRequest(masterNode, setRequest);
         assertEquals(CacheResponse.Status.OK, response.status());
-        System.out.println("    ✅ Master responded OK");
-        System.out.println("  2️⃣ Waiting for replication...");
+        System.out.println("Master responded OK");
+        System.out.println("Waiting for replication...");
         waitForReplication(key, value);
-        System.out.println("  3️⃣ Verifying all nodes...");
+        System.out.println("Verifying all nodes...");
         for (NodeInfo node : allNodes) {
             String actual = stores.get(node.nodeId()).get(key);
             assertEquals(value, actual, "Node " + node.nodeId() + " should have replicated value");
-            System.out.println("    ✅ Node " + node.nodeId() + ": " + actual);
+            System.out.println("Node " + node.nodeId() + ": " + actual);
         }
-        System.out.println("✅ TEST PASSED: SET replicated to all nodes\n");
+        System.out.println("TEST PASSED: SET replicated to all nodes\n");
     }
 
     @Test
     @DisplayName("E2E: Client DELETE → Master → Replicas (full deletion)")
     void testFullStackDeleteReplication() throws Exception {
-        System.out.println("\n🧪 TEST: Full stack DELETE replication");
+        System.out.println("\nTEST: Full stack DELETE replication");
         String key = "session:456";
         String value = "active";
-        System.out.println("  0️⃣ Setup: Inserting initial value...");
+        System.out.println("Setup: Inserting initial value...");
         CacheRequest setupRequest = new CacheRequest(
                 UUID.randomUUID().toString(),
                 System.currentTimeMillis(),
@@ -291,8 +283,8 @@ class FullStackIntegrationTest {
         );
         sendRequest(masterNode, setupRequest);
         waitForReplication(key, value);
-        System.out.println("    ✅ Initial value replicated");
-        System.out.println("  1️⃣ Client sends DELETE to master...");
+        System.out.println("Initial value replicated");
+        System.out.println("Client sends DELETE to master...");
         CacheRequest deleteRequest = new CacheRequest(
                 UUID.randomUUID().toString(),
                 System.currentTimeMillis(),
@@ -303,25 +295,25 @@ class FullStackIntegrationTest {
 
         CacheResponse response = sendRequest(masterNode, deleteRequest);
         assertEquals(CacheResponse.Status.OK, response.status());
-        System.out.println("    ✅ Master responded OK");
-        System.out.println("  2️⃣ Waiting for deletion replication...");
+        System.out.println("Master responded OK");
+        System.out.println("Waiting for deletion replication...");
         waitForDeletion(key);
-        System.out.println("  3️⃣ Verifying all nodes...");
+        System.out.println("Verifying all nodes...");
         for (NodeInfo node : allNodes) {
             String actual = stores.get(node.nodeId()).get(key);
             assertNull(actual, "Node " + node.nodeId() + " should have deleted the key");
-            System.out.println("    ✅ Node " + node.nodeId() + ": null (deleted)");
+            System.out.println("Node " + node.nodeId() + ": null (deleted)");
         }
-        System.out.println("✅ TEST PASSED: DELETE replicated to all nodes\n");
+        System.out.println("TEST PASSED: DELETE replicated to all nodes\n");
     }
 
     @Test
     @DisplayName("E2E: Client GET from master returns correct value")
     void testFullStackGet() throws Exception {
-        System.out.println("\n🧪 TEST: Full stack GET operation");
+        System.out.println("\nTEST: Full stack GET operation");
         String key = "product:789";
         String value = "Laptop";
-        System.out.println("  0️⃣ Setup: Inserting value...");
+        System.out.println("Setup: Inserting value...");
         CacheRequest setupRequest = new CacheRequest(
                 UUID.randomUUID().toString(),
                 System.currentTimeMillis(),
@@ -331,7 +323,7 @@ class FullStackIntegrationTest {
         );
         sendRequest(masterNode, setupRequest);
         waitForReplication(key, value);
-        System.out.println("  1️⃣ Client sends GET to master...");
+        System.out.println("Client sends GET to master...");
         CacheRequest getRequest = new CacheRequest(
                 UUID.randomUUID().toString(),
                 System.currentTimeMillis(),
@@ -342,14 +334,14 @@ class FullStackIntegrationTest {
         CacheResponse response = sendRequest(masterNode, getRequest);
         assertEquals(CacheResponse.Status.OK, response.status());
         assertEquals(value, response.value());
-        System.out.println("    ✅ Master returned: " + response.value());
-        System.out.println("✅ TEST PASSED: GET returned correct value\n");
+        System.out.println("Master returned: " + response.value());
+        System.out.println("TEST PASSED: GET returned correct value\n");
     }
 
     @Test
     @DisplayName("E2E: Multiple concurrent clients")
     void testMultipleConcurrentClients() throws Exception {
-        System.out.println("\n🧪 TEST: Multiple concurrent clients");
+        System.out.println("\nTEST: Multiple concurrent clients");
         int clientCount = 10;
         int operationsPerClient = 50;
         List<Thread> threads = new ArrayList<>();
@@ -384,18 +376,18 @@ class FullStackIntegrationTest {
         for (Thread thread : threads) {
             thread.join(30000);
         }
-        System.out.println("  ✅ All " + clientCount + " clients completed " + operationsPerClient + " operations each");
+        System.out.println("All " + clientCount + " clients completed " + operationsPerClient + " operations each");
         int expectedKeys = clientCount * operationsPerClient;
         int actualKeys = stores.get(masterNode.nodeId()).size();
-        System.out.println("  📊 Master has " + actualKeys + " keys (expected ~" + expectedKeys + ")");
+        System.out.println("Master has " + actualKeys + " keys (expected ~" + expectedKeys + ")");
         assertTrue(actualKeys > 0, "Master should have keys");
-        System.out.println("✅ TEST PASSED: Concurrent clients handled successfully\n");
+        System.out.println("TEST PASSED: Concurrent clients handled successfully\n");
     }
 
     @Test
     @DisplayName("E2E: GET on missing key returns NOT_FOUND")
     void testGetMissingKey() throws Exception {
-        System.out.println("\n🧪 TEST: GET missing key");
+        System.out.println("\nTEST: GET missing key");
 
         CacheRequest request = new CacheRequest(
                 UUID.randomUUID().toString(),
@@ -408,7 +400,7 @@ class FullStackIntegrationTest {
         CacheResponse response = sendRequest(masterNode, request);
         assertEquals(CacheResponse.Status.NOT_FOUND, response.status());
         assertNull(response.value());
-        System.out.println("  ✅ Master returned NOT_FOUND");
-        System.out.println("✅ TEST PASSED: Missing key handled correctly\n");
+        System.out.println("Master returned NOT_FOUND");
+        System.out.println("TEST PASSED: Missing key handled correctly\n");
     }
 }

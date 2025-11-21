@@ -22,7 +22,6 @@ class HashUtilsTest {
         int hash1 = HashUtils.hash(key);
         int hash2 = HashUtils.hash(key);
         int hash3 = HashUtils.hash(key);
-
         assertEquals(hash1, hash2, "Hash must be stable across calls");
         assertEquals(hash1, hash3, "Hash must be stable across multiple invocations");
     }
@@ -32,7 +31,6 @@ class HashUtilsTest {
     void testDifferentInputsProduceDifferentHashes() {
         int hash1 = HashUtils.hash("alpha");
         int hash2 = HashUtils.hash("beta");
-
         assertNotEquals(hash1, hash2, "Different strings should have different hash values");
     }
 
@@ -41,7 +39,6 @@ class HashUtilsTest {
     void testHashIsNonNegative() {
         int hash = HashUtils.hash("key-123");
         assertTrue(hash >= 0, "Hash must be non-negative");
-
         int hashZero = HashUtils.hash("0");
         assertTrue(hashZero >= 0, "Hash for '0' should also be non-negative");
     }
@@ -51,10 +48,8 @@ class HashUtilsTest {
     void testHashSensitivityToSmallChanges() {
         String base = "user:100";
         String changed = "user:101";
-
         int hash1 = HashUtils.hash(base);
         int hash2 = HashUtils.hash(changed);
-
         assertNotEquals(hash1, hash2, "Small input changes should produce different hashes");
     }
 
@@ -83,9 +78,7 @@ class HashUtilsTest {
             double deviation = Math.abs(count - avg) / avg;
             maxDeviation = Math.max(maxDeviation, deviation);
         }
-
-        assertTrue(maxDeviation < 0.25,
-                "Distribution across buckets is too uneven, max deviation=" + maxDeviation);
+        assertTrue(maxDeviation < 0.25, "Distribution across buckets is too uneven, max deviation=" + maxDeviation);
     }
 
     @Test
@@ -100,9 +93,7 @@ class HashUtilsTest {
             assertTrue(h >= 0);
             hashes.add(h);
         }
-
         double uniqueRatio = hashes.size() / 10_000.0;
-        assertTrue(uniqueRatio > 0.99,
-                "Too many collisions: only " + hashes.size() + " unique hashes out of 10k");
+        assertTrue(uniqueRatio > 0.99, "Too many collisions: only " + hashes.size() + " unique hashes out of 10k");
     }
 }

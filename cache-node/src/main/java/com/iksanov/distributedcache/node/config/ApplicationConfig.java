@@ -16,11 +16,18 @@ public record ApplicationConfig(
         long cacheTtlMillis,
         boolean clusterEnabled,
         List<String> clusterNodes,
-        NodeRole role
+        NodeRole role,
+        int priority
 ) {
     public enum NodeRole {
         MASTER,
         REPLICA
+    }
+
+    public ApplicationConfig {
+        if (priority < 0) {
+            throw new IllegalArgumentException("Priority must be >= 0");
+        }
     }
 
     public static ApplicationConfig fromEnv() {
@@ -33,7 +40,8 @@ public record ApplicationConfig(
                 getEnvLong("CACHE_TTL_MILLIS", 0),
                 getEnvBool("CACHE_CLUSTER_ENABLED", false),
                 parseClusterNodes(getEnv("CACHE_CLUSTER_NODES", "")),
-                parseNodeRole(getEnv("CACHE_NODE_ROLE", "MASTER"))
+                parseNodeRole(getEnv("CACHE_NODE_ROLE", "MASTER")),
+                getEnvInt("CACHE_NODE_PRIORITY", 0)
         );
     }
 
@@ -47,7 +55,8 @@ public record ApplicationConfig(
                 0,
                 false,
                 List.of(),
-                NodeRole.MASTER
+                NodeRole.MASTER,
+                0
         );
     }
 
