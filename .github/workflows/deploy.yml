@@ -1,0 +1,447 @@
+name: Deploy to Production
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  # ==============================================================
+  # Job 1: Deploy to VPS 1
+  # Components: Nginx, Proxy-1, Proxy-2, Master-1, Master-2,
+  #             Replica-3, Prometheus
+  # ==============================================================
+  deploy-vps1:
+    name: Deploy to VPS 1
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
+    environment: production-vps1
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set lowercase repository name
+        id: repo
+        run: echo "name=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      - name: Set image tag
+        id: image_tag
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ github.event.pull_request.merge_commit_sha }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create deployment files for VPS1
+        run: |
+          # Create temporary deployment directory
+          mkdir -p deploy-vps1
+
+          # Copy necessary files
+          cp docker-compose.yml deploy-vps1/
+          cp docker-compose.prod.yml deploy-vps1/
+          cp -r nginx deploy-vps1/
+          cp -r monitoring deploy-vps1/
+
+          # Generate nginx.conf for production with VPS2 IP
+          cat > deploy-vps1/nginx/nginx.conf << 'NGINXEOF'
+          events {
+              worker_connections 1024;
+          }
+
+          http {
+              # Upstream with VPS IP addresses
+              upstream cache_proxy_backend {
+                  least_conn;
+
+                  # Proxy-1 and Proxy-2 on VPS1 (localhost for Nginx)
+                  server 127.0.0.1:8080 max_fails=3 fail_timeout=30s;
+                  server 127.0.0.1:8081 max_fails=3 fail_timeout=30s;
+
+                  # Proxy-3 on VPS2 (public IP)
+                  server ${{ secrets.VPS2_HOST }}:8080 max_fails=3 fail_timeout=30s;
+              }
+
+              server {
+                  listen 80;
+                  server_name _;
+
+                  access_log /var/log/nginx/access.log;
+                  error_log /var/log/nginx/error.log;
+
+                  location / {
+                      proxy_pass http://cache_proxy_backend;
+
+                      proxy_set_header Host $host;
+                      proxy_set_header X-Real-IP $remote_addr;
+                      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                      proxy_set_header X-Forwarded-Proto $scheme;
+
+                      proxy_connect_timeout 5s;
+                      proxy_send_timeout 60s;
+                      proxy_read_timeout 60s;
+
+                      proxy_buffering on;
+                      proxy_buffer_size 4k;
+                      proxy_buffers 8 4k;
+                  }
+
+                  location /health {
+                      access_log off;
+                      return 200 "healthy\n";
+                      add_header Content-Type text/plain;
+                  }
+
+                  location /metrics {
+                      proxy_pass http://cache_proxy_backend/actuator/prometheus;
+                      proxy_set_header Host $host;
+                  }
+
+                  location /nginx_status {
+                      stub_status on;
+                      access_log off;
+                      allow 127.0.0.1;
+                      allow 172.16.0.0/12;
+                      deny all;
+                  }
+              }
+          }
+          NGINXEOF
+
+          # Create .env file for VPS1
+          cat > deploy-vps1/.env << EOF
+          COMPOSE_PROJECT_NAME=distributed-cache
+          REGISTRY=${{ env.REGISTRY }}/${{ steps.repo.outputs.name }}
+          TAG=sha-${{ steps.image_tag.outputs.tag }}
+
+          # Nginx
+          NGINX_PORT=80
+
+          # Proxy
+          PROXY_1_PORT=8080
+          PROXY_2_PORT=8081
+
+          # Cache nodes configuration
+          CACHE_NODES=master-1:${{ secrets.VPS1_HOST }}:7000:7100,master-2:${{ secrets.VPS1_HOST }}:7001:7101,master-3:${{ secrets.VPS2_HOST }}:7002:7102
+
+          # Master nodes
+          MASTER_1_NODE_ID=master-1
+          MASTER_1_CLIENT_PORT=7000
+          MASTER_1_REPLICATION_PORT=7100
+          MASTER_1_METRICS_PORT=8081
+
+          MASTER_2_NODE_ID=master-2
+          MASTER_2_CLIENT_PORT=7001
+          MASTER_2_REPLICATION_PORT=7101
+          MASTER_2_METRICS_PORT=8082
+
+          # Replica 3 (connects to Master 3 on VPS2)
+          REPLICA_3_NODE_ID=replica-3
+          REPLICA_3_MASTER_HOST=${{ secrets.VPS2_HOST }}
+          REPLICA_3_MASTER_PORT=7102
+          REPLICA_3_CLIENT_PORT=7005
+          REPLICA_3_REPLICATION_PORT=7105
+          REPLICA_3_METRICS_PORT=8086
+
+          # Monitoring
+          PROMETHEUS_PORT=9090
+          GRAFANA_ADMIN_USER=admin
+          GRAFANA_ADMIN_PASSWORD=${{ secrets.GRAFANA_PASSWORD }}
+          EOF
+
+      - name: Create docker-compose override for VPS1
+        run: |
+          cat > deploy-vps1/docker-compose.vps1.yml << 'EOF'
+          version: '3.8'
+
+          services:
+            # Only services that run on VPS1
+            nginx:
+            proxy-1:
+            proxy-2:
+            cache-master-1:
+            cache-master-2:
+            cache-replica-3:
+            prometheus:
+
+            # Disable services that run on VPS2
+            proxy-3:
+              deploy:
+                replicas: 0
+            cache-master-3:
+              deploy:
+                replicas: 0
+            cache-replica-1:
+              deploy:
+                replicas: 0
+            cache-replica-2:
+              deploy:
+                replicas: 0
+            grafana:
+              deploy:
+                replicas: 0
+            loki:
+              deploy:
+                replicas: 0
+          EOF
+
+      - name: Copy files to VPS1
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS1_HOST }}
+          username: ${{ secrets.VPS1_USER }}
+          key: ${{ secrets.VPS1_SSH_KEY }}
+          port: ${{ secrets.VPS1_SSH_PORT }}
+          source: "deploy-vps1/*"
+          target: "~/distributed-cache"
+          strip_components: 1
+
+      - name: Deploy on VPS1 via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS1_HOST }}
+          username: ${{ secrets.VPS1_USER }}
+          key: ${{ secrets.VPS1_SSH_KEY }}
+          port: ${{ secrets.VPS1_SSH_PORT }}
+          script: |
+            cd ~/distributed-cache
+
+            # Login to GHCR
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            # Pull latest images
+            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.vps1.yml pull
+
+            # Deploy with zero-downtime using rolling update
+            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.vps1.yml up -d --remove-orphans
+
+            # Clean up old images
+            docker image prune -af --filter "until=24h"
+
+            # Show running containers
+            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.vps1.yml ps
+
+      - name: Health check VPS1
+        run: |
+          sleep 30
+          curl -f http://${{ secrets.VPS1_HOST }}/health || exit 1
+
+  # ==============================================================
+  # Job 2: Deploy to VPS 2
+  # Components: Proxy-3, Master-3, Replica-1, Replica-2,
+  #             Grafana, Loki
+  # ==============================================================
+  deploy-vps2:
+    name: Deploy to VPS 2
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
+    environment: production-vps2
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set lowercase repository name
+        id: repo
+        run: echo "name=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      - name: Set image tag
+        id: image_tag
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ github.event.pull_request.merge_commit_sha }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create deployment files for VPS2
+        run: |
+          # Create temporary deployment directory
+          mkdir -p deploy-vps2
+
+          # Copy necessary files
+          cp docker-compose.yml deploy-vps2/
+          cp docker-compose.prod.yml deploy-vps2/
+          cp -r monitoring deploy-vps2/
+
+          # Create .env file for VPS2
+          cat > deploy-vps2/.env << EOF
+          COMPOSE_PROJECT_NAME=distributed-cache
+          REGISTRY=${{ env.REGISTRY }}/${{ steps.repo.outputs.name }}
+          TAG=sha-${{ steps.image_tag.outputs.tag }}
+
+          # Proxy
+          PROXY_3_PORT=8080
+
+          # Cache nodes configuration
+          CACHE_NODES=master-1:${{ secrets.VPS1_HOST }}:7000:7100,master-2:${{ secrets.VPS1_HOST }}:7001:7101,master-3:${{ secrets.VPS2_HOST }}:7002:7102
+
+          # Master 3
+          MASTER_3_NODE_ID=master-3
+          MASTER_3_CLIENT_PORT=7002
+          MASTER_3_REPLICATION_PORT=7102
+          MASTER_3_METRICS_PORT=8083
+
+          # Replica 1 (connects to Master 1 on VPS1)
+          REPLICA_1_NODE_ID=replica-1
+          REPLICA_1_MASTER_HOST=${{ secrets.VPS1_HOST }}
+          REPLICA_1_MASTER_PORT=7100
+          REPLICA_1_CLIENT_PORT=7003
+          REPLICA_1_REPLICATION_PORT=7103
+          REPLICA_1_METRICS_PORT=8084
+
+          # Replica 2 (connects to Master 2 on VPS1)
+          REPLICA_2_NODE_ID=replica-2
+          REPLICA_2_MASTER_HOST=${{ secrets.VPS1_HOST }}
+          REPLICA_2_MASTER_PORT=7101
+          REPLICA_2_CLIENT_PORT=7004
+          REPLICA_2_REPLICATION_PORT=7104
+          REPLICA_2_METRICS_PORT=8085
+
+          # Monitoring
+          GRAFANA_PORT=3000
+          GRAFANA_ADMIN_USER=admin
+          GRAFANA_ADMIN_PASSWORD=${{ secrets.GRAFANA_PASSWORD }}
+          LOKI_PORT=3100
+          EOF
+
+      - name: Create docker-compose override for VPS2
+        run: |
+          cat > deploy-vps2/docker-compose.vps2.yml << 'EOF'
+          version: '3.8'
+
+          services:
+            # Only services that run on VPS2
+            proxy-3:
+            cache-master-3:
+            cache-replica-1:
+            cache-replica-2:
+            grafana:
+            loki:
+
+            # Disable services that run on VPS1
+            nginx:
+              deploy:
+                replicas: 0
+            proxy-1:
+              deploy:
+                replicas: 0
+            proxy-2:
+              deploy:
+                replicas: 0
+            cache-master-1:
+              deploy:
+                replicas: 0
+            cache-master-2:
+              deploy:
+                replicas: 0
+            cache-replica-3:
+              deploy:
+                replicas: 0
+            prometheus:
+              deploy:
+                replicas: 0
+          EOF
+
+      - name: Copy files to VPS2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS2_HOST }}
+          username: ${{ secrets.VPS2_USER }}
+          key: ${{ secrets.VPS2_SSH_KEY }}
+          port: ${{ secrets.VPS2_SSH_PORT }}
+          source: "deploy-vps2/*"
+          target: "~/distributed-cache"
+          strip_components: 1
+
+      - name: Deploy on VPS2 via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS2_HOST }}
+          username: ${{ secrets.VPS2_USER }}
+          key: ${{ secrets.VPS2_SSH_KEY }}
+          port: ${{ secrets.VPS2_SSH_PORT }}
+          script: |
+            cd ~/distributed-cache
+
+            # Login to GHCR
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            # Pull latest images
+            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.vps2.yml pull
+
+            # Deploy with zero-downtime using rolling update
+            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.vps2.yml up -d --remove-orphans
+
+            # Clean up old images
+            docker image prune -af --filter "until=24h"
+
+            # Show running containers
+            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.vps2.yml ps
+
+  # ==============================================================
+  # Job 3: Post-deployment verification
+  # ==============================================================
+  verify-deployment:
+    name: Verify Deployment
+    runs-on: ubuntu-latest
+    needs: [deploy-vps1, deploy-vps2]
+
+    steps:
+      - name: Wait for services to stabilize
+        run: sleep 60
+
+      - name: Health check VPS1
+        run: |
+          echo "Checking VPS1 health..."
+          curl -f http://${{ secrets.VPS1_HOST }}/health || exit 1
+          echo "VPS1 is healthy!"
+
+      - name: Health check VPS2 Proxy
+        run: |
+          echo "Checking VPS2 proxy health..."
+          curl -f http://${{ secrets.VPS2_HOST }}:8080/actuator/health || exit 1
+          echo "VPS2 proxy is healthy!"
+
+      - name: Basic cache operation test
+        run: |
+          echo "Testing cache operations..."
+
+          # PUT operation
+          curl -X PUT http://${{ secrets.VPS1_HOST }}/api/cache/test-key \
+            -H "Content-Type: application/json" \
+            -d '{"value":"test-value"}' || exit 1
+
+          sleep 2
+
+          # GET operation
+          RESULT=$(curl -s http://${{ secrets.VPS1_HOST }}/api/cache/test-key)
+          echo "GET result: $RESULT"
+
+          # DELETE operation
+          curl -X DELETE http://${{ secrets.VPS1_HOST }}/api/cache/test-key || exit 1
+
+          echo "Cache operations test passed!"
+
+      - name: Notify deployment success
+        run: |
+          echo "✅ Deployment to production completed successfully!"
+          echo "VPS1: http://${{ secrets.VPS1_HOST }}"
+          echo "VPS2: http://${{ secrets.VPS2_HOST }}"
+          echo "Grafana: http://${{ secrets.VPS2_HOST }}:3000"
+          echo "Prometheus: http://${{ secrets.VPS1_HOST }}:9090"

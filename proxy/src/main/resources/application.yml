@@ -1,0 +1,25 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: cache-proxy
+
+cache:
+  cluster:
+    nodes: ${CACHE_NODES:master-1:localhost:7000:7100,master-2:localhost:7001:7101,master-3:localhost:7002:7102}
+    virtual-nodes: ${CACHE_VIRTUAL_NODES:150}
+    connection:
+      timeout-millis: ${CACHE_TIMEOUT_MS:3000}
+      max-retries: ${CACHE_MAX_RETRIES:2}
+      pool-size: ${CACHE_POOL_SIZE:10}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus,metrics
+  prometheus:
+    metrics:
+      export:
+        enabled: true

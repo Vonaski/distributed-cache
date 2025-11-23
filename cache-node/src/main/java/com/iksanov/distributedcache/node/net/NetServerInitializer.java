@@ -1,7 +1,9 @@
 package com.iksanov.distributedcache.node.net;
 
 import com.iksanov.distributedcache.common.codec.CacheMessageCodec;
+import com.iksanov.distributedcache.node.config.ApplicationConfig.NodeRole;
 import com.iksanov.distributedcache.node.core.CacheStore;
+import com.iksanov.distributedcache.node.metrics.NetMetrics;
 import com.iksanov.distributedcache.node.replication.ReplicationManager;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelPipeline;
@@ -21,35 +23,24 @@ import io.netty.handler.logging.LoggingHandler;
  *  - business logic handler (NetConnectionHandler)
  */
 public class NetServerInitializer extends ChannelInitializer<SocketChannel> {
-
-    private final CacheStore store;
+    private final RequestProcessor requestProcessor;
     private final int maxFrameLength;
-    private final ChannelLifecycleHandler lifecycleHandler;
-    private final ReplicationManager replicationManager;
+    private final NetMetrics metrics;
 
-    public NetServerInitializer(CacheStore store, int maxFrameLength) {
-        this(store, maxFrameLength, null);
-    }
-
-    public NetServerInitializer(CacheStore store, int maxFrameLength, ReplicationManager replicationManager) {
-        this.store = store;
+    public NetServerInitializer(RequestProcessor requestProcessor, int maxFrameLength, NetMetrics metrics) {
+        this.requestProcessor = requestProcessor;
         this.maxFrameLength = maxFrameLength;
-        this.lifecycleHandler = new ChannelLifecycleHandler();
-        this.replicationManager = replicationManager;
+        this.metrics = metrics;
     }
 
     @Override
     protected void initChannel(SocketChannel ch) {
         ChannelPipeline p = ch.pipeline();
-        p.addLast(lifecycleHandler);
+        p.addLast(new ChannelLifecycleHandler(metrics));
         p.addLast(new LoggingHandler(LogLevel.DEBUG));
         p.addLast(new LengthFieldBasedFrameDecoder(maxFrameLength, 0, 4, 0, 4));
         p.addLast(new LengthFieldPrepender(4));
         p.addLast(new CacheMessageCodec());
-        if (replicationManager != null) {
-            p.addLast(new NetConnectionHandler(new RequestProcessor(store, replicationManager)));
-        } else {
-            p.addLast(new NetConnectionHandler(store));
-        }
+        p.addLast(new NetConnectionHandler(requestProcessor, metrics));
     }
 }

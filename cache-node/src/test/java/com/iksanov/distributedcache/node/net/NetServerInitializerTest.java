@@ -2,7 +2,9 @@ package com.iksanov.distributedcache.node.net;
 
 import com.iksanov.distributedcache.common.codec.CacheMessageCodec;
 import com.iksanov.distributedcache.common.dto.CacheResponse;
+import com.iksanov.distributedcache.node.config.ApplicationConfig;
 import com.iksanov.distributedcache.node.core.CacheStore;
+import com.iksanov.distributedcache.node.metrics.NetMetrics;
 import com.iksanov.distributedcache.node.replication.ReplicationManager;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.embedded.EmbeddedChannel;
@@ -38,12 +40,16 @@ class NetServerInitializerTest {
     @Mock
     ReplicationManager replicationManager;
     @Mock
+    NetMetrics netMetrics;
+    @Mock
     SocketChannel socketChannel;
     private NetServerInitializer initializerWithReplication;
+    private RequestProcessor requestProcessor;
 
     @BeforeEach
     void setUp() {
-        initializerWithReplication = new NetServerInitializer(store, 1024, replicationManager);
+        requestProcessor = new RequestProcessor(store, replicationManager, ApplicationConfig.NodeRole.MASTER, netMetrics, null);
+        initializerWithReplication = new NetServerInitializer(requestProcessor, 1024, netMetrics);
     }
 
     @Test
@@ -51,9 +57,7 @@ class NetServerInitializerTest {
     void shouldAddExpectedHandlersInOrder() {
         EmbeddedChannel embedded = new EmbeddedChannel();
         when(socketChannel.pipeline()).thenReturn(embedded.pipeline());
-
         initializerWithReplication.initChannel(socketChannel);
-
         List<String> handlerTypes = embedded.pipeline().names().stream()
                 .map(name -> embedded.pipeline().get(name))
                 .filter(h -> h != null)
@@ -69,11 +73,8 @@ class NetServerInitializerTest {
                 "CacheMessageCodec",
                 "NetConnectionHandler"
         );
-
-        assertTrue(handlerTypes.containsAll(expectedTypes),
-                "Pipeline must contain all expected handler types");
-        assertEquals(expectedTypes, handlerTypes.subList(0, expectedTypes.size()),
-                "Handlers must be in correct order");
+        assertTrue(handlerTypes.containsAll(expectedTypes), "Pipeline must contain all expected handler types");
+        assertEquals(expectedTypes, handlerTypes.subList(0, expectedTypes.size()), "Handlers must be in correct order");
     }
 
     @Test
@@ -81,21 +82,13 @@ class NetServerInitializerTest {
     void shouldUseCorrectHandlerTypes() {
         EmbeddedChannel embedded = new EmbeddedChannel();
         when(socketChannel.pipeline()).thenReturn(embedded.pipeline());
-
         initializerWithReplication.initChannel(socketChannel);
-
-        assertNotNull(findByType(embedded, ChannelLifecycleHandler.class),
-                "ChannelLifecycleHandler must be present");
-        assertNotNull(findByType(embedded, LoggingHandler.class),
-                "LoggingHandler must be present");
-        assertNotNull(findByType(embedded, LengthFieldBasedFrameDecoder.class),
-                "LengthFieldBasedFrameDecoder must be present");
-        assertNotNull(findByType(embedded, LengthFieldPrepender.class),
-                "LengthFieldPrepender must be present");
-        assertNotNull(findByType(embedded, CacheMessageCodec.class),
-                "CacheMessageCodec must be present");
-        assertNotNull(findByType(embedded, NetConnectionHandler.class),
-                "NetConnectionHandler must be present");
+        assertNotNull(findByType(embedded, ChannelLifecycleHandler.class), "ChannelLifecycleHandler must be present");
+        assertNotNull(findByType(embedded, LoggingHandler.class), "LoggingHandler must be present");
+        assertNotNull(findByType(embedded, LengthFieldBasedFrameDecoder.class), "LengthFieldBasedFrameDecoder must be present");
+        assertNotNull(findByType(embedded, LengthFieldPrepender.class), "LengthFieldPrepender must be present");
+        assertNotNull(findByType(embedded, CacheMessageCodec.class), "CacheMessageCodec must be present");
+        assertNotNull(findByType(embedded, NetConnectionHandler.class), "NetConnectionHandler must be present");
     }
 
     @Test
@@ -103,31 +96,11 @@ class NetServerInitializerTest {
     void pipelineShouldBeOperational() {
         EmbeddedChannel embedded = new EmbeddedChannel();
         when(socketChannel.pipeline()).thenReturn(embedded.pipeline());
-
         initializerWithReplication.initChannel(socketChannel);
-
         assertTrue(embedded.isOpen(), "Channel should be open");
-
         CacheResponse testResponse = CacheResponse.ok("req-1", "pong");
-
-        assertDoesNotThrow(() -> embedded.writeOutbound(testResponse),
-                "Pipeline must accept supported outbound messages");
-
-        assertDoesNotThrow(() -> embedded.writeInbound(testResponse),
-                "Pipeline must accept supported inbound messages");
-    }
-
-    @Test
-    @DisplayName("Initializer should support constructor without replication manager")
-    void shouldSupportNonReplicatedInitialization() {
-        NetServerInitializer simpleInit = new NetServerInitializer(store, 1024);
-        EmbeddedChannel embedded = new EmbeddedChannel();
-        when(socketChannel.pipeline()).thenReturn(embedded.pipeline());
-
-        assertDoesNotThrow(() -> simpleInit.initChannel(socketChannel));
-
-        assertNotNull(findByType(embedded, NetConnectionHandler.class),
-                "NetConnectionHandler must be present when replication manager is absent");
+        assertDoesNotThrow(() -> embedded.writeOutbound(testResponse), "Pipeline must accept supported outbound messages");
+        assertDoesNotThrow(() -> embedded.writeInbound(testResponse), "Pipeline must accept supported inbound messages");
     }
 
     private static ChannelHandler findByType(EmbeddedChannel ch, Class<?> type) {

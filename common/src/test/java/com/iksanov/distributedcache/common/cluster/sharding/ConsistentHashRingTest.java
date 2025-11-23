@@ -44,11 +44,9 @@ class ConsistentHashRingTest {
     @DisplayName("Add and remove operations should correctly update the ring")
     void testAddAndRemoveNode() {
         assertEquals(3, ring.getNodes().size());
-
         ring.addNode(nodeD);
         assertTrue(ring.getNodes().contains(nodeD));
         assertEquals(4, ring.getNodes().size());
-
         ring.removeNode(nodeB);
         assertFalse(ring.getNodes().contains(nodeB));
         assertEquals(3, ring.getNodes().size());
@@ -67,8 +65,7 @@ class ConsistentHashRingTest {
         double average = totalKeys / (double) ring.getNodes().size();
         counts.forEach((id, count) -> {
             double deviation = Math.abs(count - average) / average;
-            assertTrue(deviation < 0.4, // allow up to 40% deviation
-                    "Node " + id + " distribution is too unbalanced, deviation=" + deviation);
+            assertTrue(deviation < 0.4, "Node " + id + " distribution is too unbalanced, deviation=" + deviation);
         });
     }
 
@@ -79,7 +76,6 @@ class ConsistentHashRingTest {
         ring2.addNode(nodeA);
         ring2.addNode(nodeB);
         ring2.addNode(nodeC);
-
         for (int i = 0; i < 1000; i++) {
             String key = "key-" + i;
             NodeInfo n1 = ring.getNodeForKey(key);
@@ -96,20 +92,14 @@ class ConsistentHashRingTest {
             String key = "key-" + i;
             before.put(key, ring.getNodeForKey(key));
         }
-
         ring.addNode(nodeD);
-
         int moved = 0;
         for (int i = 0; i < 5000; i++) {
             String key = "key-" + i;
             NodeInfo afterNode = ring.getNodeForKey(key);
-            if (!afterNode.equals(before.get(key))) {
-                moved++;
-            }
+            if (!afterNode.equals(before.get(key))) moved++;
         }
-
         double movedRatio = moved / 5000.0;
-        // For consistent hashing, only a fraction of keys should move (~1/N)
         assertTrue(movedRatio < 0.5, "Too many keys were remapped after adding one node: " + movedRatio);
     }
 
@@ -119,7 +109,6 @@ class ConsistentHashRingTest {
         ring.removeNode(nodeA);
         ring.removeNode(nodeB);
         ring.removeNode(nodeC);
-
         assertNull(ring.getNodeForKey("any-key"));
         assertEquals(0, ring.getNodes().size());
     }
@@ -129,8 +118,7 @@ class ConsistentHashRingTest {
     void testDuplicateNodeIsIgnored() {
         int before = ring.getNodes().size();
         ring.addNode(nodeA); // already exists
-        assertEquals(before, ring.getNodes().size(),
-                "Adding a duplicate node must not increase the node count");
+        assertEquals(before, ring.getNodes().size(), "Adding a duplicate node must not increase the node count");
     }
 
     @Test

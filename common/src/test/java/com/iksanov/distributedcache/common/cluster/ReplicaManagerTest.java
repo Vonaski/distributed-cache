@@ -27,10 +27,8 @@ class ReplicaManagerTest {
     @BeforeEach
     void setup() {
         replicaManager = new ReplicaManager();
-
         master1 = new NodeInfo("master-1", "10.0.0.1", 8080);
         master2 = new NodeInfo("master-2", "10.0.0.2", 8081);
-
         replica1 = new NodeInfo("replica-1", "10.0.0.3", 8082);
         replica2 = new NodeInfo("replica-2", "10.0.0.4", 8083);
         replica3 = new NodeInfo("replica-3", "10.0.0.5", 8084);
@@ -41,12 +39,10 @@ class ReplicaManagerTest {
     void testRegisterReplicaCreatesBidirectionalMapping() {
         replicaManager.registerReplica(master1, replica1);
         replicaManager.registerReplica(master1, replica2);
-
         Set<NodeInfo> replicas = replicaManager.getReplicas(master1);
         assertEquals(2, replicas.size(), "Master should have exactly two replicas");
         assertTrue(replicas.contains(replica1));
         assertTrue(replicas.contains(replica2));
-
         assertEquals(master1, replicaManager.getMaster(replica1), "Replica1 should reference master1");
         assertEquals(master1, replicaManager.getMaster(replica2), "Replica2 should reference master1");
     }
@@ -56,9 +52,7 @@ class ReplicaManagerTest {
     void testRemoveReplicaRemovesFromMasterAndReplicaMap() {
         replicaManager.registerReplica(master1, replica1);
         replicaManager.registerReplica(master1, replica2);
-
         replicaManager.removeReplica(replica1);
-
         assertNull(replicaManager.getMaster(replica1), "Replica1 should no longer have a master mapping");
         Set<NodeInfo> replicas = replicaManager.getReplicas(master1);
         assertFalse(replicas.contains(replica1), "Replica1 should be removed from master1’s replica set");
@@ -71,15 +65,10 @@ class ReplicaManagerTest {
         replicaManager.registerReplica(master1, replica1);
         replicaManager.registerReplica(master1, replica2);
         replicaManager.registerReplica(master2, replica3);
-
         replicaManager.removeMaster(master1);
-
-        // All replicas of master1 should be removed
         assertTrue(replicaManager.getReplicas(master1).isEmpty(), "All replicas of master1 should be removed");
         assertNull(replicaManager.getMaster(replica1), "Replica1 should no longer be linked to master1");
         assertNull(replicaManager.getMaster(replica2), "Replica2 should no longer be linked to master1");
-
-        // Master2 and its replica should remain intact
         assertEquals(master2, replicaManager.getMaster(replica3));
         assertFalse(replicaManager.getReplicas(master2).isEmpty());
     }
@@ -89,11 +78,8 @@ class ReplicaManagerTest {
     void testMultipleMastersRemainIsolated() {
         replicaManager.registerReplica(master1, replica1);
         replicaManager.registerReplica(master2, replica2);
-
         assertEquals(Set.of(replica1), replicaManager.getReplicas(master1));
         assertEquals(Set.of(replica2), replicaManager.getReplicas(master2));
-
-        // Ensure cross-links don't exist
         assertEquals(master1, replicaManager.getMaster(replica1));
         assertEquals(master2, replicaManager.getMaster(replica2));
         assertNotEquals(replicaManager.getMaster(replica1), replicaManager.getMaster(replica2));
@@ -103,8 +89,7 @@ class ReplicaManagerTest {
     @DisplayName("Registering the same replica again should not create duplicates")
     void testDuplicateRegistrationIsIgnored() {
         replicaManager.registerReplica(master1, replica1);
-        replicaManager.registerReplica(master1, replica1); // duplicate
-
+        replicaManager.registerReplica(master1, replica1);
         Set<NodeInfo> replicas = replicaManager.getReplicas(master1);
         assertEquals(1, replicas.size(), "Duplicate replica registration should not create extra entries");
     }
@@ -131,7 +116,6 @@ class ReplicaManagerTest {
         replicaManager.registerReplica(master1, replica1);
         replicaManager.registerReplica(master1, replica2);
         replicaManager.registerReplica(master1, replica3);
-
         Set<NodeInfo> replicas = replicaManager.getReplicas(master1);
         assertEquals(3, replicas.size());
         assertTrue(replicas.containsAll(Set.of(replica1, replica2, replica3)));
@@ -148,7 +132,6 @@ class ReplicaManagerTest {
         ReplicaManager manager = new ReplicaManager();
         NodeInfo master = new NodeInfo("m1", "127.0.0.1", 8080);
         try (ExecutorService pool = Executors.newFixedThreadPool(4)) {
-
             for (int i = 0; i < 100; i++) {
                 int idx = i;
                 pool.submit(() -> {
@@ -157,12 +140,9 @@ class ReplicaManagerTest {
                     if (idx % 2 == 0) manager.removeReplica(replica);
                 });
             }
-
             pool.shutdown();
             pool.awaitTermination(3, TimeUnit.SECONDS);
         }
-
-        // After concurrent ops, all mappings must be consistent
         for (NodeInfo replica : manager.getReplicas(master)) {
             assertEquals(master, manager.getMaster(replica));
         }

@@ -19,7 +19,7 @@ public class ReplicationMessageCodec extends MessageToMessageCodec<ByteBuf, Repl
     @Override
     protected void encode(ChannelHandlerContext ctx, ReplicationTask task, List<Object> out) {
         ByteBuf buf = ctx.alloc().buffer();
-        buf.writeByte(task.operation() == ReplicationTask.Operation.SET ? 0 : 1);
+        buf.writeByte(task.operation().ordinal());
 
         byte[] keyBytes = task.key().getBytes(StandardCharsets.UTF_8);
         buf.writeInt(keyBytes.length);
@@ -30,7 +30,7 @@ public class ReplicationMessageCodec extends MessageToMessageCodec<ByteBuf, Repl
             buf.writeInt(valueBytes.length);
             buf.writeBytes(valueBytes);
         } else {
-            buf.writeInt(0);
+            buf.writeInt(-1);
         }
 
         buf.writeLong(task.timestamp());
@@ -40,49 +40,58 @@ public class ReplicationMessageCodec extends MessageToMessageCodec<ByteBuf, Repl
             buf.writeInt(originBytes.length);
             buf.writeBytes(originBytes);
         } else {
-            buf.writeInt(0);
+            buf.writeInt(-1);
         }
+        buf.writeLong(task.sequence());
         out.add(buf);
     }
 
     @Override
     protected void decode(ChannelHandlerContext ctx, ByteBuf buf, List<Object> out) {
         int opByte = buf.readByte();
-        ReplicationTask.Operation operation = (opByte == 0)
-                ? ReplicationTask.Operation.SET
-                : ReplicationTask.Operation.DELETE;
+        ReplicationTask.Operation operation;
+
+        try {
+            operation = ReplicationTask.Operation.values()[opByte];
+        } catch (ArrayIndexOutOfBoundsException e) {
+            throw new CorruptedFrameException("Invalid operation byte: " + opByte);
+        }
 
         int keyLen = buf.readInt();
-        if (keyLen <= 0 || keyLen > 1024) {
-            throw new CorruptedFrameException("Invalid key length: " + keyLen);
-        }
+        if (keyLen <= 0 || keyLen > 1024) throw new CorruptedFrameException("Invalid key length: " + keyLen);
         byte[] keyBytes = new byte[keyLen];
         buf.readBytes(keyBytes);
         String key = new String(keyBytes, StandardCharsets.UTF_8);
 
         int valueLen = buf.readInt();
         String value = null;
-        if (valueLen > 0) {
-            if (valueLen > 64 * 1024) {
-                throw new CorruptedFrameException("Value too long: " + valueLen);
+        if (valueLen >= 0) {
+            if (valueLen > 64 * 1024) throw new CorruptedFrameException("Value too long: " + valueLen);
+            if (valueLen > 0) {
+                byte[] valueBytes = new byte[valueLen];
+                buf.readBytes(valueBytes);
+                value = new String(valueBytes, StandardCharsets.UTF_8);
+            } else {
+                value = "";
             }
-            byte[] valueBytes = new byte[valueLen];
-            buf.readBytes(valueBytes);
-            value = new String(valueBytes, StandardCharsets.UTF_8);
         }
 
         long timestamp = buf.readLong();
 
         int originLen = buf.readInt();
         String origin = null;
-        if (originLen > 0) {
-            if (originLen > 1024) {
-                throw new CorruptedFrameException("Origin too long: " + originLen);
+        if (originLen >= 0) {
+            if (originLen > 1024) throw new CorruptedFrameException("Origin too long: " + originLen);
+            if (originLen > 0) {
+                byte[] originBytes = new byte[originLen];
+                buf.readBytes(originBytes);
+                origin = new String(originBytes, StandardCharsets.UTF_8);
+            } else {
+                origin = "";
             }
-            byte[] originBytes = new byte[originLen];
-            buf.readBytes(originBytes);
-            origin = new String(originBytes, StandardCharsets.UTF_8);
         }
-        out.add(new ReplicationTask(key, value, operation, timestamp, origin));
+        long sequence = 0L;
+        if (buf.readableBytes() >= 8) sequence = buf.readLong();
+        out.add(new ReplicationTask(key, value, operation, timestamp, origin, sequence));
     }
 }

@@ -1,25 +1,34 @@
 package com.iksanov.distributedcache.node.core;
 
-public class CacheEntry {
-    private final String key;
-    private volatile String value;
-    private final long expireAt;
+import java.util.concurrent.atomic.AtomicInteger;
 
-    public CacheEntry(String key, String value, long expireAt) {
+public class CacheEntry {
+    final String key;
+    final String value;
+    final long expireAt;
+    final AtomicInteger accessCount;
+    volatile long lastAccessTime;
+
+    CacheEntry(String key, String value, long expireAt) {
         this.key = key;
         this.value = value;
         this.expireAt = expireAt;
+        this.accessCount = new AtomicInteger(0);
+        this.lastAccessTime = System.currentTimeMillis();
     }
 
-    public String key() { return key; }
-    public String value() { return value; }
-    public long expireAt() { return expireAt; }
-
-    public boolean isExpired() {
+    boolean isExpired() {
         return expireAt > 0 && System.currentTimeMillis() >= expireAt;
     }
 
-    public void setValue(String newValue) {
-        this.value = newValue;
+    void recordAccess() {
+        accessCount.incrementAndGet();
+        lastAccessTime = System.currentTimeMillis();
+    }
+
+    int evictionScore() {
+        long ageSeconds = (System.currentTimeMillis() - lastAccessTime) / 1000;
+        int frequency = accessCount.get();
+        return (int)(ageSeconds * 2) - frequency;
     }
 }

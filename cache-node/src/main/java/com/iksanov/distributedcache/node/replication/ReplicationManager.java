@@ -1,89 +1,191 @@
 package com.iksanov.distributedcache.node.replication;
 
 import com.iksanov.distributedcache.common.cluster.NodeInfo;
+import com.iksanov.distributedcache.node.metrics.ReplicationMetrics;
+import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import java.util.Objects;
-import java.util.function.Function;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Coordinates replication for this node.
+ * Manages asynchronous replication of cache operations across distributed nodes.
  * <p>
- * Design notes:
+ * This component coordinates between master and replica nodes, ensuring data consistency
+ * through async replication of SET and DELETE operations.
+ * <p>
+ * Design principles:
  * <ul>
- *   <li>{@code ReplicaManager} (from common. Cluster) stores mapping master → replicas and replica → master,
- *       but does not resolve which master is responsible for a key.</li>
- *   <li>Therefore ReplicationManager accepts a {@link java.util.function.Function Function&lt;String, NodeInfo&gt;}
- *       primaryResolver, which resolves the primary/master node for a key (for example, using ConsistentHashRing).</li>
+ *   <li>Non-blocking replication to maintain low latency on primary operations</li>
+ *   <li>Single-threaded executor ensures FIFO ordering for replication tasks</li>
+ *   <li>Graceful error handling prevents replication failures from affecting primary operations</li>
+ *   <li>Clean shutdown with configurable timeout for pending tasks</li>
  * </ul>
+ * <p>
+ * Thread safety: This class is thread-safe and can be safely accessed by multiple threads.
+ *
+ * @see ReplicationSender
+ * @see ReplicationReceiver
+ * @see ReplicationTask
  */
 public class ReplicationManager {
 
     private static final Logger log = LoggerFactory.getLogger(ReplicationManager.class);
+    private static final int SHUTDOWN_TIMEOUT_SECONDS = 5;
+    private static final AtomicInteger INSTANCE_COUNTER = new AtomicInteger(0);
     private final NodeInfo currentNode;
     private final ReplicationSender sender;
     private final ReplicationReceiver receiver;
-    private final Function<String, NodeInfo> primaryResolver;
+    private final ReplicationMetrics metrics;
+    private final ExecutorService replicationExecutor;
+    private final int instanceId;
+    private final AtomicLong sequenceGenerator = new AtomicLong(0);
 
-    public ReplicationManager(NodeInfo currentNode,
-                              ReplicationSender sender,
-                              ReplicationReceiver receiver,
-                              Function<String, NodeInfo> primaryResolver) {
-        this.currentNode = Objects.requireNonNull(currentNode, "currentNode");
-        this.sender = Objects.requireNonNull(sender, "sender");
-        this.receiver = Objects.requireNonNull(receiver, "receiver");
-        this.primaryResolver = Objects.requireNonNull(primaryResolver, "primaryResolver");
+    /**
+     * Creates a new ReplicationManager instance.
+     * <p>
+     * Simplified for master-replica architecture where sharding is handled by proxy.
+     * Master always replicates all data to its replicas without checking key ownership.
+     *
+     * @param currentNode Information about the current node
+     * @param sender      Component responsible for sending replication tasks
+     * @param receiver    Component responsible for receiving and applying replication tasks
+     * @param metrics     Optional metrics collector for replication statistics
+     * @throws NullPointerException if currentNode, sender, or receiver is null
+     */
+    public ReplicationManager(NodeInfo currentNode, ReplicationSender sender, ReplicationReceiver receiver, ReplicationMetrics metrics) {
+        this.currentNode = Objects.requireNonNull(currentNode, "currentNode cannot be null");
+        this.sender = Objects.requireNonNull(sender, "sender cannot be null");
+        this.receiver = Objects.requireNonNull(receiver, "receiver cannot be null");
+        this.metrics = metrics;
+        this.instanceId = INSTANCE_COUNTER.incrementAndGet();
+        this.replicationExecutor = createReplicationExecutor(currentNode.nodeId(), instanceId);
+        log.info("ReplicationManager initialized for node: {} (instance: {})", currentNode.nodeId(), instanceId);
     }
 
-    private boolean isMasterForKey(String key) {
-        NodeInfo master = primaryResolver.apply(key);
-        if (master == null) {
-            log.warn("Primary resolver returned null for key={}, skipping replication", key);
-            return false;
-        }
-        if (!currentNode.equals(master)) {
-            log.debug("This node ({}) is not master for key={}, master={}, skip replication",
-                    currentNode.nodeId(), key, master.nodeId());
-            return false;
-        }
-        return true;
+    private static ExecutorService createReplicationExecutor(String nodeId, int instanceId) {
+        ThreadFactory factory = runnable -> {
+            Thread thread = new Thread(runnable);
+            thread.setName(String.format("replication-%s-%d", nodeId, instanceId));
+            thread.setDaemon(true);
+            thread.setUncaughtExceptionHandler((t, e) ->
+                    log.error("Uncaught exception in replication thread {}: {}", t.getName(), e.getMessage(), e)
+            );
+            return thread;
+        };
+        return Executors.newSingleThreadExecutor(factory);
     }
 
+    /**
+     * Called when a SET operation is performed locally on this node.
+     * Master always replicates to its replicas (sharding is handled by proxy).
+     *
+     * @param key   the cache key
+     * @param value the value to set
+     */
     public void onLocalSet(String key, String value) {
-        Objects.requireNonNull(key, "key");
-        Objects.requireNonNull(value, "value");
-        if (!isMasterForKey(key)) return;
+        Objects.requireNonNull(key, "key cannot be null");
+        Objects.requireNonNull(value, "value cannot be null");
 
-        ReplicationTask task = ReplicationTask.ofSet(key, value, currentNode.nodeId());
-        sender.replicate(currentNode, task);
-        log.debug("Triggered replication SET key={} from master={}", key, currentNode.nodeId());
+        if (metrics != null) metrics.incrementPendingTasks();
+        long seq = sequenceGenerator.incrementAndGet();
+        ReplicationTask task = ReplicationTask.ofSet(key, value, currentNode.nodeId(), seq);
+        submitReplicationTask(task, "SET");
     }
 
+    /**
+     * Called when a DELETE operation is performed locally on this node.
+     * Master always replicates to its replicas (sharding is handled by proxy).
+     *
+     * @param key the cache key to delete
+     */
     public void onLocalDelete(String key) {
-        Objects.requireNonNull(key, "key");
-        if (!isMasterForKey(key)) return;
+        Objects.requireNonNull(key, "key cannot be null");
 
-        ReplicationTask task = ReplicationTask.ofDelete(key, currentNode.nodeId());
-        sender.replicate(currentNode, task);
-        log.debug("Triggered replication DELETE key={} from master={}", key, currentNode.nodeId());
+        if (metrics != null) metrics.incrementPendingTasks();
+        long seq = sequenceGenerator.incrementAndGet();
+        ReplicationTask task = ReplicationTask.ofDelete(key, currentNode.nodeId(), seq);
+        submitReplicationTask(task, "DELETE");
+    }
+
+    private void submitReplicationTask(ReplicationTask task, String operationType) {
+        replicationExecutor.submit(() -> {
+            Timer.Sample sample = (metrics != null) ? metrics.startReplicationTimer() : null;
+            try {
+                long startTime = System.nanoTime();
+                sender.replicate(currentNode, task);
+                long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime);
+
+                if (durationMs > 100) {
+                    log.warn("Slow replication of {} for key={} took {}ms", operationType, task.key(), durationMs);
+                } else {
+                    log.debug("Replicated {} for key={} in {}ms", operationType, task.key(), durationMs);
+                }
+
+                if (sample != null) metrics.stopReplicationTimer(sample);
+            } catch (Exception e) {
+                log.error("Failed to replicate {} for key={}: {}", operationType, task.key(), e.getMessage(), e);
+            } finally {
+                if (metrics != null) metrics.decrementPendingTasks();
+            }
+        });
     }
 
     public void onReplicationReceived(ReplicationTask task) {
+        if (task == null) {
+            log.warn("Received null replication task, ignoring");
+            return;
+        }
+
         try {
-            log.info("Applying replicated {} for key={} (origin={}, ts={})",
-                    task.operation(), task.key(), task.origin(), task.timestamp());
+            log.debug("Applying replication: operation={}, key={}, origin={}", task.operation(), task.key(), task.origin());
             receiver.applyTask(task);
+            log.trace("Successfully applied replication for key={}", task.key());
         } catch (Exception e) {
-            log.error("Failed to apply incoming replication task: {}", task, e);
+            log.error("Failed to apply replication task for key={}: {}", task.key(), e.getMessage(), e);
         }
     }
 
     public void shutdown() {
+        log.info("Starting shutdown of ReplicationManager for node: {}", currentNode.nodeId());
+        replicationExecutor.shutdown();
+        try {
+            if (!replicationExecutor.awaitTermination(SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                log.warn("Replication executor did not terminate within {}s, forcing shutdown", SHUTDOWN_TIMEOUT_SECONDS);
+                replicationExecutor.shutdownNow();
+
+                if (!replicationExecutor.awaitTermination(2, TimeUnit.SECONDS)) {
+                    log.error("Replication executor did not terminate after forced shutdown");
+                }
+            }
+        } catch (InterruptedException e) {
+            log.warn("Interrupted while waiting for replication executor shutdown");
+            replicationExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+
         try {
             sender.shutdown();
         } catch (Exception e) {
-            log.warn("Error while shutting down replication sender", e);
+            log.error("Error while shutting down replication sender: {}", e.getMessage(), e);
         }
+        log.info("ReplicationManager shutdown completed for node: {}", currentNode.nodeId());
+    }
+
+    public NodeInfo getCurrentNode() {
+        return currentNode;
+    }
+
+    public boolean isShutdown() {
+        return replicationExecutor.isShutdown();
+    }
+
+    public boolean isTerminated() {
+        return replicationExecutor.isTerminated();
     }
 }

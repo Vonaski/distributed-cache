@@ -35,4 +35,14 @@ public record NodeInfo(String nodeId, String host, int port, int replicationPort
     public String toString() {
         return "NodeInfo[nodeId=%s, host=%s, port=%d, replicationPort=%d]".formatted(nodeId, host, port, replicationPort);
     }
+
+    public static NodeInfo fromString(String nodeAddr) {
+        String[] parts = nodeAddr.split(":");
+        if (parts.length < 3) throw new IllegalArgumentException("Invalid node address format: " + nodeAddr);
+        String nodeId = parts[0];
+        String host = parts[1];
+        int port = Integer.parseInt(parts[2]);
+        int replicationPort = parts.length > 3 ? Integer.parseInt(parts[3]) : port + 1000;
+        return new NodeInfo(nodeId, host, port, replicationPort);
+    }
 }

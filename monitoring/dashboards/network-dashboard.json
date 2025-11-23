@@ -1,0 +1,29 @@
+{
+  "uid": "net-metrics",
+  "title": "Network Metrics (Netty + Cache Node)",
+  "panels": [
+    {
+      "type": "graph",
+      "title": "Request Rate (RPS)",
+      "targets": [{ "expr": "rate(net_requests_total[1m])", "legendFormat": "{{instance}}" }]
+    },
+    {
+      "type": "graph",
+      "title": "Active Connections",
+      "targets": [{ "expr": "net_connections_active", "legendFormat": "{{instance}}" }]
+    },
+    {
+      "type": "graph",
+      "title": "Error Rate",
+      "targets": [{ "expr": "rate(net_requests_errors[1m])", "legendFormat": "{{instance}}" }]
+    },
+    {
+      "type": "graph",
+      "title": "Request Duration (avg)",
+      "targets": [{ "expr": "rate(net_request_duration_seconds_sum[5m]) / rate(net_request_duration_seconds_count[5m])", "legendFormat": "{{instance}}" }]
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 27,
+  "version": 1
+}

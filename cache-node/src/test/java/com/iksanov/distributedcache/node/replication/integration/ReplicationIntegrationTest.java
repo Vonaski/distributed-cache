@@ -7,23 +7,19 @@ import com.iksanov.distributedcache.node.core.InMemoryCacheStore;
 import com.iksanov.distributedcache.node.replication.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import org.junit.jupiter.api.*;
-
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Function;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Integration test for replication between a master and a single replica node.
- * Verifies propagation of SET and DELETE commands and ignores self-origin messages.
+ * Verifies propagation of SET and DELETE commands.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class ReplicationIntegrationTest {
 
-    private NioEventLoopGroup bossGroup;
-    private NioEventLoopGroup workerGroup;
+    private NioEventLoopGroup sharedEventLoopGroup;
     private ReplicationManager masterReplicationManager;
     private ReplicationManager replicaReplicationManager;
     private CacheStore masterStore;
@@ -31,23 +27,28 @@ public class ReplicationIntegrationTest {
     private NodeInfo masterNode;
     private NodeInfo replicaNode;
     private ReplicaManager replicaManager;
+    private ReplicationReceiver masterReceiver;
     private ReplicationReceiver replicaReceiver;
+    private ReplicationSender masterSender;
+    private ReplicationSender replicaSender;
 
     @BeforeAll
     void setup() throws Exception {
-        bossGroup = new NioEventLoopGroup(1);
-        workerGroup = new NioEventLoopGroup(2);
+        sharedEventLoopGroup = new NioEventLoopGroup(2);
 
-        int masterPort = 9500;
-        int replicaPort = 9501;
-
-        masterNode = new NodeInfo("master-1", "127.0.0.1", masterPort);
-        replicaNode = new NodeInfo("replica-1", "127.0.0.1", replicaPort);
+        masterNode = new NodeInfo("master-1", "127.0.0.1", 9500);
+        replicaNode = new NodeInfo("replica-1", "127.0.0.1", 9501);
 
         masterStore = new InMemoryCacheStore(1000, 0, 500);
         replicaStore = new InMemoryCacheStore(1000, 0, 500);
 
-        // 🔹 Важно: слушаем именно replicationPort (port + 1000)
+        masterReceiver = new ReplicationReceiver(
+                masterNode.host(),
+                masterNode.replicationPort(),
+                masterStore
+        );
+        masterReceiver.start();
+
         replicaReceiver = new ReplicationReceiver(
                 replicaNode.host(),
                 replicaNode.replicationPort(),
@@ -55,28 +56,27 @@ public class ReplicationIntegrationTest {
         );
         replicaReceiver.start();
 
+        Thread.sleep(500);
+
         replicaManager = new ReplicaManager();
         replicaManager.registerReplica(masterNode, replicaNode);
+        masterSender = new ReplicationSender(replicaManager, sharedEventLoopGroup);
+        replicaSender = new ReplicationSender(replicaManager, sharedEventLoopGroup);
 
-        // 🔹 Передаём общий EventLoopGroup, чтобы избежать гонок
-        ReplicationSender masterSender = new ReplicationSender(replicaManager, workerGroup);
-        ReplicationSender replicaSender = new ReplicationSender(replicaManager, workerGroup);
 
-        // 🔹 Мастер тоже слушает на своём replicationPort
-        ReplicationReceiver masterReceiver = new ReplicationReceiver(
-                masterNode.host(),
-                masterNode.replicationPort(),
-                masterStore
+        masterReplicationManager = new ReplicationManager(
+                masterNode,
+                masterSender,
+                masterReceiver,
+                null
         );
-        masterReceiver.start();
 
-        Function<String, NodeInfo> masterPrimaryResolver = k -> masterNode;
-        Function<String, NodeInfo> replicaPrimaryResolver = k -> masterNode;
-
-        masterReplicationManager = new ReplicationManager(masterNode, masterSender, masterReceiver, masterPrimaryResolver);
-        replicaReplicationManager = new ReplicationManager(replicaNode, replicaSender, replicaReceiver, replicaPrimaryResolver);
-
-        // Небольшая задержка для Netty init
+        replicaReplicationManager = new ReplicationManager(
+                replicaNode,
+                replicaSender,
+                replicaReceiver,
+                null
+        );
         Thread.sleep(300);
     }
 
@@ -84,48 +84,113 @@ public class ReplicationIntegrationTest {
     void tearDown() {
         if (masterReplicationManager != null) masterReplicationManager.shutdown();
         if (replicaReplicationManager != null) replicaReplicationManager.shutdown();
+        if (masterReceiver != null) masterReceiver.stop();
         if (replicaReceiver != null) replicaReceiver.stop();
-        if (bossGroup != null) bossGroup.shutdownGracefully();
-        if (workerGroup != null) workerGroup.shutdownGracefully();
+        if (sharedEventLoopGroup != null) sharedEventLoopGroup.shutdownGracefully();
     }
 
     @Test
-    void testReplicationSetAndDelete() throws Exception {
-        String key = "foo";
-        String value = "bar";
+    @DisplayName("Should replicate SET operation from master to replica")
+    void testReplicationSet() throws Exception {
+        String key = "user:100";
+        String value = "Alice";
 
         masterReplicationManager.onLocalSet(key, value);
-
-        awaitCondition(() -> value.equals(replicaStore.get(key)), Duration.ofSeconds(5), "replicated value");
-
+        awaitCondition(
+                () -> value.equals(replicaStore.get(key)),
+                Duration.ofSeconds(5),
+                "replicated SET operation"
+        );
         assertEquals(value, replicaStore.get(key), "Replica must receive value via replication");
+    }
 
+    @Test
+    @DisplayName("Should replicate DELETE operation from master to replica")
+    void testReplicationDelete() throws Exception {
+        String key = "session:42";
+        String value = "active";
+        masterReplicationManager.onLocalSet(key, value);
+        awaitCondition(
+                () -> value.equals(replicaStore.get(key)),
+                Duration.ofSeconds(5),
+                "initial SET replication"
+        );
         masterReplicationManager.onLocalDelete(key);
-
-        awaitCondition(() -> replicaStore.get(key) == null, Duration.ofSeconds(5), "replicated delete");
-
+        awaitCondition(
+                () -> replicaStore.get(key) == null,
+                Duration.ofSeconds(5),
+                "replicated DELETE operation"
+        );
         assertNull(replicaStore.get(key), "Replica must remove value via replication delete");
     }
 
     @Test
-    void testSelfOriginIgnored() {
-        String key = "loopKey";
-        String value = "v";
-
-        ReplicationTask task = ReplicationTask.ofSet(key, value, replicaNode.nodeId());
-
-        replicaReceiver.applyTask(task);
-
-        assertNull(replicaStore.get(key), "Self-origin replication task must be ignored");
+    @DisplayName("Should handle multiple sequential operations correctly")
+    void testMultipleSequentialOperations() throws Exception {
+        String key = "counter";
+        for (int i = 0; i < 5; i++) {
+            String value = "v" + i;
+            masterReplicationManager.onLocalSet(key, value);
+            String expectedValue = value;
+            awaitCondition(
+                    () -> expectedValue.equals(replicaStore.get(key)),
+                    Duration.ofSeconds(3),
+                    "replication of iteration " + i
+            );
+            assertEquals(value, replicaStore.get(key), "Replica should have latest value after iteration " + i);
+        }
     }
 
-    private void awaitCondition(java.util.function.Supplier<Boolean> cond, Duration timeout, String what) throws InterruptedException {
+    @Test
+    @DisplayName("Should replicate multiple different keys")
+    void testMultipleKeys() throws Exception {
+        int keyCount = 10;
+
+        for (int i = 0; i < keyCount; i++) {
+            String key = "key-" + i;
+            String value = "value-" + i;
+            masterReplicationManager.onLocalSet(key, value);
+        }
+
+        for (int i = 0; i < keyCount; i++) {
+            String key = "key-" + i;
+            String expectedValue = "value-" + i;
+            awaitCondition(
+                    () -> expectedValue.equals(replicaStore.get(key)),
+                    Duration.ofSeconds(5),
+                    "replication of " + key
+            );
+            assertEquals(expectedValue, replicaStore.get(key), "Key " + key + " must be replicated correctly");
+        }
+    }
+
+    @Test
+    @DisplayName("Replica should not replicate when it's not the master for a key")
+    void testReplicaDoesNotReplicateNonMasterKeys() throws Exception {
+        String key = "replica-key";
+        String value = "replica-value";
+
+        int replicaStoreSizeBefore = replicaStore.size();
+        replicaReplicationManager.onLocalSet(key, value);
+        Thread.sleep(500);
+        assertNull(masterStore.get(key), "Master should not receive replication from replica when replica is not master");
+    }
+
+    private void awaitCondition(
+            java.util.function.Supplier<Boolean> condition,
+            Duration timeout,
+            String what
+    ) throws InterruptedException {
         Instant start = Instant.now();
         while (Duration.between(start, Instant.now()).compareTo(timeout) < 0) {
             try {
-                if (Boolean.TRUE.equals(cond.get())) return;
-            } catch (Throwable ignored) {}
-            TimeUnit.MILLISECONDS.sleep(100);
+                if (Boolean.TRUE.equals(condition.get())) {
+                    return;
+                }
+            } catch (Throwable ignored) {
+                // Continue waiting
+            }
+            TimeUnit.MILLISECONDS.sleep(50);
         }
         fail("Timed out waiting for " + what);
     }

@@ -1,227 +1,205 @@
 package com.iksanov.distributedcache.node.core;
 
 import com.iksanov.distributedcache.common.exception.CacheException;
+import com.iksanov.distributedcache.node.metrics.CacheMetrics;
+import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.util.ArrayList;
-import java.util.Deque;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * Thread-safe in-memory cache store with TTL + LRU.
- * - Uses ConcurrentHashMap for storage.
- * - Uses ConcurrentLinkedDeque of CacheEntry instances for access order.
- * - Eviction is handled by a single-threaded evictor executor (no CompletableFuture).
- * - Cleanup of expired entries is scheduled.
- * <p>
- * Important invariants:
- * - store (ConcurrentHashMap) is the source of truth for which CacheEntry is current.
- * - accessOrder holds CacheEntry instances; evict/cleanup remove by instance using store.remove(key, entry).
+ * High-performance thread-safe cache with Approximate LRU eviction.
+ * Uses sampling-based eviction similar to Redis for better concurrency.
  */
 public class InMemoryCacheStore implements CacheStore {
 
     private static final Logger log = LoggerFactory.getLogger(InMemoryCacheStore.class);
     private final ConcurrentMap<String, CacheEntry> store = new ConcurrentHashMap<>();
-    private final Deque<CacheEntry> accessOrder = new ConcurrentLinkedDeque<>();
-    private final AtomicInteger currentSize = new AtomicInteger(0);
     private final int maxSize;
     private final long defaultTtlMillis;
-    private final ScheduledExecutorService cleaner;
-    private final ExecutorService evictor;
-    private final AtomicBoolean evictionInProgress = new AtomicBoolean(false);
+    private final ReentrantLock evictionLock = new ReentrantLock();
+    private final CacheMetrics metrics;
+    private static final int SAMPLE_SIZE = 8;
+    private static final int EVICTION_BATCH = 5;
+    private final AtomicInteger putCounter = new AtomicInteger();
+    private static final int LAZY_CLEANUP_INTERVAL = 100;
 
     public InMemoryCacheStore(int maxSize, long defaultTtlMillis, long cleanupIntervalMillis) {
-        this(maxSize, defaultTtlMillis, cleanupIntervalMillis, null, null);
+        this(maxSize, defaultTtlMillis, cleanupIntervalMillis, new CacheMetrics());
     }
 
-    public InMemoryCacheStore(int maxSize, long defaultTtlMillis, long cleanupIntervalMillis, ScheduledExecutorService cleanerExecutor, ExecutorService evictorExecutor) {
+    public InMemoryCacheStore(int maxSize, long defaultTtlMillis, long cleanupIntervalMillis, CacheMetrics metrics) {
         if (maxSize <= 0) throw new CacheException("maxSize must be > 0");
-        if (cleanupIntervalMillis <= 0) throw new CacheException("cleanupIntervalMillis must be > 0");
-
         this.maxSize = maxSize;
         this.defaultTtlMillis = defaultTtlMillis;
-        this.cleaner = cleanerExecutor != null ? cleanerExecutor : buildSingleThreadScheduler("cache-cleaner");
-        this.evictor = evictorExecutor != null ? evictorExecutor : buildSingleThreadExecutor("cache-evictor");
-        this.cleaner.scheduleAtFixedRate(this::cleanupExpiredEntries, cleanupIntervalMillis, cleanupIntervalMillis, TimeUnit.MILLISECONDS);
-        this.cleaner.scheduleAtFixedRate(this::compactAccessOrder, cleanupIntervalMillis * 6, cleanupIntervalMillis * 6, TimeUnit.MILLISECONDS);
-        log.info("InMemoryCacheStore initialized: maxSize={}, defaultTTL={}ms, cleanupInterval={}ms", maxSize, defaultTtlMillis, cleanupIntervalMillis);
-    }
-
-    private static ScheduledExecutorService buildSingleThreadScheduler(String name) {
-        ThreadFactory factory = runnable -> {
-            Thread t = new Thread(runnable, name);
-            t.setDaemon(true);
-            return t;
-        };
-        return Executors.newSingleThreadScheduledExecutor(factory);
-    }
-
-
-    private static ExecutorService buildSingleThreadExecutor(String name) {
-        ThreadFactory factory = runnable -> {
-            Thread t = new Thread(runnable, name);
-            t.setDaemon(true);
-            return t;
-        };
-        return Executors.newSingleThreadExecutor(factory);
+        this.metrics = metrics;
+        log.info("InMemoryCacheStore initialized: maxSize={}, defaultTTL={}ms, eviction=ApproximateLRU", maxSize, defaultTtlMillis);
     }
 
     @Override
     public String get(String key) {
         Objects.requireNonNull(key, "key");
-        CacheEntry entry = store.get(key);
-        if (entry == null) {
-            log.debug("Cache MISS for key={}", key);
-            return null;
+        Timer.Sample sample = metrics.startGetTimer();
+
+        try {
+            CacheEntry entry = store.get(key);
+            if (entry == null) {
+                metrics.recordMiss();
+                return null;
+            }
+
+            if (entry.isExpired()) {
+                store.remove(key, entry);
+                metrics.recordMiss();
+                return null;
+            }
+
+            entry.recordAccess();
+            metrics.recordHit();
+            return entry.value;
+        } finally {
+            metrics.stopGetTimer(sample);
+            metrics.updateSize(store.size());
         }
-        if (entry.isExpired()) {
-            removeInternal(key, entry);
-            log.debug("Cache EXPIRED for key={}", key);
-            return null;
-        }
-        touchEntry(entry);
-        log.debug("Cache HIT for key={}", key);
-        return entry.value();
     }
 
     @Override
     public void put(String key, String value) {
         Objects.requireNonNull(key, "key");
-        long expireAt = defaultTtlMillis > 0
-                ? System.currentTimeMillis() + defaultTtlMillis
-                : -1;
+        Objects.requireNonNull(value, "value");
 
-        CacheEntry newEntry = new CacheEntry(key, value, expireAt);
+        Timer.Sample sample = metrics.startPutTimer();
 
-        store.compute(key, (_, old) -> {
-            if (old == null) {
-                currentSize.incrementAndGet();
-                log.debug("Put new entry key={} (expireAt={})", key, expireAt > 0 ? expireAt : "∞");
-            }
-            accessOrder.addLast(newEntry);
-            return newEntry;
-        });
+        try {
+            long expireAt = defaultTtlMillis > 0 ? System.currentTimeMillis() + defaultTtlMillis : -1;
+            CacheEntry newEntry = new CacheEntry(key, value, expireAt);
+            CacheEntry previous = store.put(key, newEntry);
 
-        if (currentSize.get() > maxSize && evictionInProgress.compareAndSet(false, true)) {
-            evictor.submit(() -> {
-                try {
-                    evictUntilSizeWithinLimit();
-                } finally {
-                    evictionInProgress.set(false);
+            if (previous == null) {
+                if (store.size() > maxSize) {
+                    if (evictionLock.tryLock()) {
+                        try {
+                            if (store.size() > maxSize) evictEntries();
+                        } finally {
+                            evictionLock.unlock();
+                        }
+                    }
                 }
-            });
+
+                if (store.size() > (maxSize * 12 / 10)) {
+                    evictionLock.lock();
+                    try {
+                        if (store.size() > maxSize) {
+                            log.warn("Hard limit triggered: currentSize={}, maxSize={}, evicting aggressively", store.size(), maxSize);
+                            evictEntriesAggressively();
+                        }
+                    } finally {
+                        evictionLock.unlock();
+                    }
+                }
+            }
+            if (putCounter.incrementAndGet() % LAZY_CLEANUP_INTERVAL == 0) lazyCleanupExpired();
+        } finally {
+            metrics.stopPutTimer(sample);
+            metrics.updateSize(store.size());
         }
-        if (log.isInfoEnabled()) log.info("Cache size after put: {}", currentSize.get());
     }
 
     @Override
     public void delete(String key) {
         Objects.requireNonNull(key, "key");
-        CacheEntry removed = store.remove(key);
-        if (removed != null) {
-            currentSize.decrementAndGet();
-            log.debug("Deleted key={}", key);
-        }
+        store.remove(key);
+        metrics.updateSize(store.size());
     }
 
     @Override
     public void clear() {
         store.clear();
-        accessOrder.clear();
-        currentSize.set(0);
-        log.info("Cache cleared manually");
+        metrics.updateSize(0);
+        log.info("Cache cleared");
     }
 
     @Override
     public int size() {
-        return currentSize.get();
+        return store.size();
     }
 
     public void shutdown() {
-        cleaner.shutdownNow();
-        evictor.shutdownNow();
-        try {
-            if (!cleaner.awaitTermination(200, TimeUnit.MILLISECONDS)) {
-                log.warn("Cleaner did not terminate promptly");
-            }
-            if (!evictor.awaitTermination(500, TimeUnit.MILLISECONDS)) {
-                log.warn("Evictor did not terminate promptly");
-            }
-        } catch (InterruptedException ignored) {
-            Thread.currentThread().interrupt();
-        }
-        log.info("Cache cleaner and evictor shutdown");
+        clear();
+        log.info("Cache shutdown");
     }
 
-    private void touchEntry(CacheEntry entry) {
-        accessOrder.addLast(entry);
-    }
+    private void evictEntries() {
+        int toEvict = Math.max(1, store.size() - maxSize + EVICTION_BATCH);
 
-    private void evictUntilSizeWithinLimit() {
-        try {
-            while (currentSize.get() > maxSize) {
-                CacheEntry candidate = accessOrder.pollFirst();
-                if (candidate == null) break;
-
-                CacheEntry current = store.get(candidate.key());
-                if (current != candidate) continue;
-
-                boolean removed = store.remove(candidate.key(), candidate);
-                if (removed) {
-                    currentSize.decrementAndGet();
-                    log.warn("Evicted key={} due to LRU policy (maxSize={})", candidate.key(), maxSize);
-                }
+        for (int i = 0; i < toEvict && store.size() > maxSize; i++) {
+            CacheEntry victim = findEvictionCandidate();
+            if (victim != null && store.remove(victim.key, victim)) {
+                metrics.recordEviction();
             }
-        } catch (Throwable t) {
-            log.error("Error during eviction", t);
         }
     }
 
-    private void cleanupExpiredEntries() {
-        try {
-            List<CacheEntry> toRemove = new ArrayList<>();
-            for (ConcurrentHashMap.Entry<String, CacheEntry> me : store.entrySet()) {
-                CacheEntry e = me.getValue();
-                if (e != null && e.isExpired()) toRemove.add(e);
-            }
+    private void evictEntriesAggressively() {
+        int currentOverflow = store.size() - maxSize;
+        int toEvict = Math.max(EVICTION_BATCH * 2, currentOverflow + EVICTION_BATCH);
 
-            int removedCount = 0;
-            for (CacheEntry e : toRemove) {
-                boolean removed = store.remove(e.key(), e);
-                if (removed) {
-                    currentSize.decrementAndGet();
-                    removedCount++;
-                }
+        int evicted = 0;
+        for (int i = 0; i < toEvict && store.size() > maxSize; i++) {
+            CacheEntry victim = findEvictionCandidate();
+            if (victim != null && store.remove(victim.key, victim)) {
+                metrics.recordEviction();
+                evicted++;
             }
-            if (removedCount > 0) log.info("Cleaned up {} expired entries (current size={})", removedCount, store.size());
-        } catch (Throwable t) {
-            log.error("Error during cleanupExpiredEntries", t);
         }
+        if (evicted > 0) log.info("Aggressive eviction completed: removed {} entries, size now {}/{}", evicted, store.size(), maxSize);
     }
 
-    private void compactAccessOrder() {
-        int before = accessOrder.size();
-        int skipped = 0;
-        for (Iterator<CacheEntry> it = accessOrder.iterator(); it.hasNext();) {
-            CacheEntry e = it.next();
-            CacheEntry actual = store.get(e.key());
-            if (actual != e) {
-                it.remove();
-                skipped++;
+    private CacheEntry findEvictionCandidate() {
+        Collection<CacheEntry> values = store.values();
+        if (values.isEmpty()) return null;
+
+        List<CacheEntry> sample = new ArrayList<>(SAMPLE_SIZE);
+        Iterator<CacheEntry> iterator = values.iterator();
+
+        int checked = 0;
+        while (iterator.hasNext() && checked < SAMPLE_SIZE * 2) {
+            CacheEntry entry = iterator.next();
+            checked++;
+            if (entry.isExpired()) return entry;
+            if (sample.size() < SAMPLE_SIZE) sample.add(entry);
+        }
+
+        if (sample.isEmpty()) return null;
+
+        CacheEntry victim = sample.getFirst();
+        int maxScore = victim.evictionScore();
+
+        for (int i = 1; i < sample.size(); i++) {
+            CacheEntry candidate = sample.get(i);
+            int score = candidate.evictionScore();
+            if (score > maxScore) {
+                maxScore = score;
+                victim = candidate;
             }
         }
-        if (skipped > 0) log.debug("Compacted LRU queue: removed {} stale entries ({} -> {})", skipped, before, accessOrder.size());
+        return victim;
     }
 
-    private void removeInternal(String key, CacheEntry entry) {
-        if (store.remove(key, entry)) {
-            currentSize.decrementAndGet();
+    private void lazyCleanupExpired() {
+        int cleaned = 0;
+        int maxChecks = Math.min(20, store.size() / 10);
+        Iterator<Map.Entry<String, CacheEntry>> iterator = store.entrySet().iterator();
+        for (int i = 0; i < maxChecks && iterator.hasNext(); i++) {
+            Map.Entry<String, CacheEntry> entry = iterator.next();
+            CacheEntry cacheEntry = entry.getValue();
+            if (cacheEntry != null && cacheEntry.isExpired()) {
+                if (store.remove(entry.getKey(), cacheEntry)) cleaned++;
+            }
         }
+        if (cleaned > 0) log.debug("Lazy cleanup removed {} expired entries", cleaned);
     }
 }
