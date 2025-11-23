@@ -76,6 +76,7 @@ nul
 *.secret
 *.key
 *.pem
+SETUP_SECRETS.md
 
 ############################
 # Cache / Reports / Coverage

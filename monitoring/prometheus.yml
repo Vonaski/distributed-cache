@@ -9,18 +9,29 @@ scrape_configs:
       - targets:
           - 'proxy-1:8080'
           - 'proxy-2:8080'
+          - 'proxy-3:8080'
         labels:
           app: 'proxy'
 
-  - job_name: 'cache-node'
+  - job_name: 'cache-master'
     metrics_path: '/metrics'
     static_configs:
       - targets:
-          - 'cache-node-1:8081'
-          - 'cache-node-2:8081'
-          - 'cache-node-3:8081'
+          - 'cache-master-1:9081'
+          - 'cache-master-2:9082'
+          - 'cache-master-3:9083'
         labels:
-          app: 'cache-node'
+          app: 'cache-master'
+
+  - job_name: 'cache-replica'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets:
+          - 'cache-replica-1:9084'
+          - 'cache-replica-2:9085'
+          - 'cache-replica-3:9086'
+        labels:
+          app: 'cache-replica'
 
   - job_name: 'prometheus'
     static_configs:

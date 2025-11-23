@@ -1,431 +1,358 @@
-# Deployment Guide - 2 VPS Servers
+# Deployment Guide
 
-This guide covers deploying the distributed cache system on 2 VPS servers with 4 vCPU and 8GB RAM each.
+## Overview
 
-## Architecture Overview
+This guide explains how to set up CI/CD for deploying the distributed cache system to 2 VPS servers using GitHub Actions.
 
-### Server 1 (VPS-1): 4 vCPU, 8GB RAM
-```
-Component          | CPU Limit | Memory Limit | Memory Actual
--------------------|-----------|--------------|---------------
-Nginx              | 0.5       | 256M         | ~100M
-Proxy-1            | 1.0       | 768M         | ~640M (512M heap + 128M direct)
-Proxy-2            | 1.0       | 768M         | ~640M (512M heap + 128M direct)
-Cache-Master-1     | 2.0       | 2560M        | ~2512M (2GB heap + 512M direct)
-Cache-Master-2     | 2.0       | 2560M        | ~2512M (2GB heap + 512M direct)
-Cache-Replica-3    | 1.5       | 2048M        | ~1920M (1.5GB heap + 384M direct)
-Prometheus         | 0.5       | 768M         | ~512M
--------------------|-----------|--------------|---------------
-TOTAL              | 8.5       | 9728M        | ~7.8GB
-```
+## Architecture
 
-### Server 2 (VPS-2): 4 vCPU, 8GB RAM
-```
-Component          | CPU Limit | Memory Limit | Memory Actual
--------------------|-----------|--------------|---------------
-Proxy-3            | 1.0       | 768M         | ~640M (512M heap + 128M direct)
-Cache-Master-3     | 2.0       | 2560M        | ~2512M (2GB heap + 512M direct)
-Cache-Replica-1    | 1.5       | 2048M        | ~1920M (1.5GB heap + 384M direct)
-Cache-Replica-2    | 1.5       | 2048M        | ~1920M (1.5GB heap + 384M direct)
-Grafana            | 0.5       | 512M         | ~256M
-Loki               | 0.5       | 768M         | ~512M
--------------------|-----------|--------------|---------------
-TOTAL              | 7.0       | 8704M        | ~7.7GB
-```
-
-## JVM Configuration Explained
-
-All Java applications use optimized JVM settings for low-latency caching:
-
-### ZGC (Z Garbage Collector)
-```bash
--XX:+UseZGC                    # Enable ZGC
--XX:+ZGenerational             # Use generational ZGC (Java 21+)
-```
-
-**Why ZGC?**
-- Ultra-low pause times (<1ms)
-- Works well with large heaps (our masters have 2GB)
-- Better than G1GC for latency-sensitive applications
-- Generational mode improves throughput
-
-### Heap Settings
-```bash
--Xmx2g -Xms2g                  # Masters: 2GB heap (min=max for predictability)
--Xmx1536m -Xms1536m            # Replicas: 1.5GB heap
--Xmx512m -Xms512m              # Proxies: 512MB heap
-```
-
-**Why equal min/max?**
-- JVM allocates full heap at startup
-- No runtime heap resizing (eliminates pauses)
-- `-XX:+AlwaysPreTouch` pre-faults all pages (faster first access)
-
-### Direct Memory (Netty Buffers)
-```bash
--XX:MaxDirectMemorySize=512m   # Masters: 512MB for direct buffers
--XX:MaxDirectMemorySize=384m   # Replicas: 384MB
--XX:MaxDirectMemorySize=128m   # Proxies: 128MB
-```
-
-**Why direct memory?**
-- Netty uses off-heap buffers for zero-copy I/O
-- Cached in `sun.misc.Unsafe` (native memory)
-- Faster network operations (no copying between heap/kernel)
-- Less GC pressure
-
-### Netty Configuration
-```bash
--Dio.netty.allocator.type=pooled         # Use pooled byte buffer allocator
--Dio.netty.maxDirectMemory=0             # Let JVM manage direct memory limit
--Dio.netty.leakDetection.level=simple    # Detect buffer leaks (production-safe)
-```
-
-**What this does:**
-- **Pooled allocator**: Reuses ByteBuf objects (reduces allocations)
-- **Direct buffers**: Netty allocates buffers outside JVM heap (faster I/O)
-- **Leak detection**: Warns if buffers are not released (memory leak prevention)
-
-### Other Optimizations
-```bash
--XX:+UseStringDeduplication    # Deduplicate identical strings (saves memory)
--XX:+AlwaysPreTouch            # Touch all memory pages at startup (predictable performance)
--XX:+UnlockExperimentalVMOptions  # Required for some ZGC options
-```
+- **VPS 1**: Nginx, Proxy-1, Proxy-2, Cache Master-1, Master-2, Replica-3, Prometheus
+- **VPS 2**: Proxy-3, Cache Master-3, Replica-1, Replica-2, Grafana, Loki
 
 ## Prerequisites
 
-### On Both VPS Servers:
-1. Docker 20.10+
-2. Docker Compose 2.0+
-3. At least 8GB RAM available
-4. At least 20GB disk space
+1. **2 VPS servers** with:
+   - Ubuntu 20.04+ or similar Linux distribution
+   - Docker and Docker Compose installed
+   - SSH access configured
+   - Minimum 4 vCPU and 8GB RAM each
 
-### Network Requirements:
-- Servers can communicate with each other (same VPC or VPN)
-- Open ports between servers (7000-7105, 8080-8086)
-- External access to port 80 (Nginx) on Server 1
+2. **GitHub repository** with admin access
 
-## Step-by-Step Deployment
+3. **GitHub Personal Access Token (PAT)** with `write:packages` permission (you already created this)
 
-### 1. Prepare Servers
+## Step-by-Step Setup
 
-On both servers:
+### 1. Prepare VPS Servers
+
+On **both VPS servers**, run the following commands:
+
 ```bash
-# Update system
-sudo apt update && sudo apt upgrade -y
-
 # Install Docker
 curl -fsSL https://get.docker.com -o get-docker.sh
 sudo sh get-docker.sh
+sudo usermod -aG docker $USER
 
 # Install Docker Compose
 sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
 sudo chmod +x /usr/local/bin/docker-compose
 
-# Add current user to docker group
-sudo usermod -aG docker $USER
-newgrp docker
-
 # Verify installation
 docker --version
 docker-compose --version
+
+# Create deployment directory
+mkdir -p ~/distributed-cache
 ```
 
-### 2. Setup Docker Network Between Servers
+### 2. Configure SSH Access for GitHub Actions
 
-If servers are in different networks, set up overlay network or VPN.
-
-**Option A: Docker Swarm (Recommended)**
-```bash
-# On Server 1 (manager):
-docker swarm init --advertise-addr <SERVER_1_IP>
-# This outputs a join token, copy it
-
-# On Server 2 (worker):
-docker swarm join --token <TOKEN> <SERVER_1_IP>:2377
-```
-
-**Option B: Manual Network Configuration**
-Update `docker-compose.yml` to use host IPs instead of container names for cross-server communication.
-
-### 3. Build and Push Docker Images
-
-On your development machine:
+On your **local machine**, generate an SSH key pair for deployment:
 
 ```bash
-# Login to your Docker registry
-docker login
+# Generate SSH key pair (without passphrase)
+ssh-keygen -t ed25519 -C "github-actions-deploy" -f ~/.ssh/github_actions_deploy -N ""
 
-# Set registry in environment
-export REGISTRY=docker.io/your-username
-export TAG=v1.0.0
-
-# Build images
-docker-compose build
-
-# Tag images
-docker tag distributed-cache-proxy:latest ${REGISTRY}/cache-proxy:${TAG}
-docker tag distributed-cache-cache-node:latest ${REGISTRY}/cache-node:${TAG}
-
-# Push to registry
-docker push ${REGISTRY}/cache-proxy:${TAG}
-docker push ${REGISTRY}/cache-node:${TAG}
+# This creates:
+# - Private key: ~/.ssh/github_actions_deploy
+# - Public key: ~/.ssh/github_actions_deploy.pub
 ```
 
-### 4. Deploy on Server 1
+Copy the **public key** to both VPS servers:
 
 ```bash
-# Clone repository
-git clone <your-repo-url>
-cd distributed-cache
+# For VPS1
+ssh-copy-id -i ~/.ssh/github_actions_deploy.pub user@VPS1_IP
 
-# Create production environment file
-cp .env.example .env.prod
+# For VPS2
+ssh-copy-id -i ~/.ssh/github_actions_deploy.pub user@VPS2_IP
 
-# Edit .env.prod
-nano .env.prod
+# Or manually: copy content of github_actions_deploy.pub and paste it to ~/.ssh/authorized_keys on each VPS
 ```
 
-**Update .env.prod with your values:**
-```bash
-REGISTRY=docker.io/your-username
-TAG=v1.0.0
+### 3. Configure GitHub Secrets
 
-# Update cache nodes to use Server 2 IP for master-3
-CACHE_NODES=master-1:localhost:7000:7100,master-2:localhost:7001:7101,master-3:<SERVER_2_IP>:7002:7102
-```
+Go to your GitHub repository → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
 
-**Create docker-compose.server1.yml:**
-```yaml
-# Include only services for Server 1
-version: '3.8'
-services:
-  nginx:
-  proxy-1:
-  proxy-2:
-  cache-master-1:
-  cache-master-2:
-  cache-replica-3:
-  prometheus:
-```
+Add the following secrets:
 
-**Start services:**
-```bash
-docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.server1.yml up -d
-```
+| Secret Name | Value | Description |
+|------------|-------|-------------|
+| `VPS1_HOST` | `123.45.67.89` | IP address or domain of VPS 1 |
+| `VPS1_USER` | `ubuntu` | SSH username for VPS 1 |
+| `VPS1_SSH_KEY` | `<private_key_content>` | Content of `~/.ssh/github_actions_deploy` (private key) |
+| `VPS1_SSH_PORT` | `22` | SSH port for VPS 1 (usually 22) |
+| `VPS2_HOST` | `98.76.54.32` | IP address or domain of VPS 2 |
+| `VPS2_USER` | `ubuntu` | SSH username for VPS 2 |
+| `VPS2_SSH_KEY` | `<private_key_content>` | Same private key as VPS1 |
+| `VPS2_SSH_PORT` | `22` | SSH port for VPS 2 (usually 22) |
+| `GRAFANA_PASSWORD` | `<secure_password>` | Admin password for Grafana |
 
-### 5. Deploy on Server 2
+**To get the private key content:**
 
 ```bash
-# Clone repository
-git clone <your-repo-url>
-cd distributed-cache
+# Display the private key
+cat ~/.ssh/github_actions_deploy
 
-# Create production environment file
-cp .env.example .env.prod
-nano .env.prod
+# Copy the entire output including:
+# -----BEGIN OPENSSH PRIVATE KEY-----
+# ... key content ...
+# -----END OPENSSH PRIVATE KEY-----
 ```
 
-**Update .env.prod:**
+### 4. Configure Firewall Rules
+
+On **VPS 1**, open the following ports:
+
 ```bash
-REGISTRY=docker.io/your-username
-TAG=v1.0.0
+# HTTP traffic (Nginx)
+sudo ufw allow 80/tcp
 
-# Update replica masters to point to Server 1
-REPLICA_1_MASTER_HOST=<SERVER_1_IP>
-REPLICA_2_MASTER_HOST=<SERVER_1_IP>
-REPLICA_3_MASTER_HOST=<SERVER_1_IP>
+# Cache node client ports
+sudo ufw allow 7000:7002/tcp
+
+# Cache node replication ports
+sudo ufw allow 7100:7102/tcp
+
+# Prometheus
+sudo ufw allow 9090/tcp
+
+# Allow VPS2 to connect
+sudo ufw allow from VPS2_IP
+
+# Enable firewall
+sudo ufw enable
 ```
 
-**Create docker-compose.server2.yml:**
-```yaml
-# Include only services for Server 2
-version: '3.8'
-services:
-  proxy-3:
-  cache-master-3:
-  cache-replica-1:
-  cache-replica-2:
-  grafana:
-  loki:
-```
+On **VPS 2**, open the following ports:
 
-**Start services:**
 ```bash
-docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.server2.yml up -d
+# Proxy port
+sudo ufw allow 8082/tcp
+
+# Cache node ports
+sudo ufw allow 7002:7005/tcp
+
+# Replication ports
+sudo ufw allow 7102:7105/tcp
+
+# Grafana
+sudo ufw allow 3000/tcp
+
+# Allow VPS1 to connect
+sudo ufw allow from VPS1_IP
+
+# Enable firewall
+sudo ufw enable
 ```
 
-### 6. Verify Deployment
+### 5. Configure GitHub Container Registry
 
-**On Server 1:**
+Enable GHCR for your repository:
+
+1. Go to **Settings** → **Actions** → **General**
+2. Scroll to **Workflow permissions**
+3. Select **Read and write permissions**
+4. Check **Allow GitHub Actions to create and approve pull requests**
+5. Click **Save**
+
+### 6. Test the CI/CD Pipeline
+
+#### Test 1: CI Pipeline (tests + build)
+
 ```bash
-# Check running containers
-docker ps
+# Create a new branch
+git checkout -b test-ci
 
-# Check logs
-docker-compose logs -f cache-master-1
+# Make a small change
+echo "# Test" >> README.md
 
-# Test Nginx
-curl http://localhost/health
+# Commit and push
+git add .
+git commit -m "test: trigger CI pipeline"
+git push origin test-ci
 
-# Test cache operation
-curl -X PUT http://localhost/cache/test -H "Content-Type: application/json" -d '{"value":"hello"}'
-curl http://localhost/cache/test
+# Create a Pull Request on GitHub
+# The CI pipeline should automatically run tests and build Docker images
 ```
 
-**On Server 2:**
+Check the **Actions** tab in GitHub to see the pipeline running.
+
+#### Test 2: Deployment Pipeline
+
 ```bash
-# Check running containers
-docker ps
-
-# Check replication status
-docker-compose logs -f cache-replica-1
+# After CI passes, merge the PR to main branch
+# The deployment pipeline will automatically trigger and deploy to both VPS servers
 ```
 
-**Access monitoring:**
-- Prometheus: `http://<SERVER_1_IP>:9090`
-- Grafana: `http://<SERVER_2_IP>:3000` (admin/admin)
+### 7. Verify Deployment
 
-## Monitoring
+After deployment completes, verify the services:
 
-### Key Metrics to Watch
-
-1. **Memory Usage**
-   - JVM heap should stay around 70-80% of Xmx
-   - Direct memory usage (Netty buffers)
-   - Container memory limit adherence
-
-2. **GC Pauses (should be <1ms with ZGC)**
-   - Check in GC logs
-   - Monitor in Prometheus: `jvm_gc_pause_seconds`
-
-3. **Replication Lag**
-   - Should be <100ms typically
-   - Monitor: `replication_lag_seconds`
-
-4. **Cache Hit Rate**
-   - Target: >80%
-   - Monitor: `cache_hits_total / (cache_hits_total + cache_misses_total)`
-
-### Enable JVM Metrics
-
-Add to JAVA_OPTS if needed:
 ```bash
--XX:+PrintGCDetails -XX:+PrintGCDateStamps -Xlog:gc*:file=/logs/gc.log
+# Check VPS1 health
+curl http://VPS1_IP/health
+
+# Test cache operations
+curl -X PUT http://VPS1_IP/api/cache/test-key \
+  -H "Content-Type: application/json" \
+  -d '{"value":"test-value"}'
+
+curl http://VPS1_IP/api/cache/test-key
+
+# Access monitoring
+# Prometheus: http://VPS1_IP:9090
+# Grafana: http://VPS2_IP:3000 (login: admin / <GRAFANA_PASSWORD>)
 ```
+
+## CI/CD Pipeline Details
+
+### CI Pipeline (`.github/workflows/ci.yml`)
+
+Triggered on:
+- Push to `develop` or `main` branches
+- Pull requests to `develop` or `main` branches
+- Manual workflow dispatch
+
+Jobs:
+1. **Test**: Run unit tests (excludes Stress, Load, Resilience tests)
+2. **Build**: Build Maven artifacts
+3. **Docker Build**: Build and push Docker images to GHCR
+4. **Security Scan**: Scan Docker images for vulnerabilities using Trivy
+
+### Deploy Pipeline (`.github/workflows/deploy.yml`)
+
+Triggered on:
+- PR merged to `main` branch
+- Manual workflow dispatch
+
+Jobs:
+1. **Deploy VPS1**: Deploy Nginx, Proxy-1, Proxy-2, Cache nodes, Prometheus
+2. **Deploy VPS2**: Deploy Proxy-3, Cache nodes, Grafana, Loki
+3. **Verify**: Health checks and basic cache operation tests
+
+## Test Configuration
+
+Tests excluded from CI:
+- `**/*StressTest.java` - Stress tests (long-running)
+- `**/*LoadTest.java` - Load tests (long-running)
+- `**/*ResilienceTest.java` - Resilience tests (long-running)
+
+To run all tests locally:
+
+```bash
+mvn clean test
+```
+
+To run only fast tests (same as CI):
+
+```bash
+mvn clean test -Dtest='!**/*StressTest,!**/*LoadTest,!**/*ResilienceTest'
+```
+
+## Manual Deployment
+
+If you need to deploy manually:
+
+1. Go to **Actions** tab in GitHub
+2. Select **Deploy to Production** workflow
+3. Click **Run workflow**
+4. Select branch and environment
+5. Click **Run workflow**
 
 ## Troubleshooting
 
-### High Memory Usage
-```bash
-# Check JVM heap usage
-docker exec cache-master-1 jcmd 1 GC.heap_info
+### Issue: SSH connection fails
 
-# Check Netty direct memory
-docker exec cache-master-1 jcmd 1 VM.native_memory summary
+```bash
+# On your local machine, test SSH connection
+ssh -i ~/.ssh/github_actions_deploy user@VPS_IP
+
+# Check SSH key permissions
+chmod 600 ~/.ssh/github_actions_deploy
+chmod 644 ~/.ssh/github_actions_deploy.pub
 ```
 
-### GC Pauses Too Long
-- Reduce heap size if > 4GB
-- Check if ZGC is actually enabled: `docker exec cache-master-1 jcmd 1 VM.flags | grep ZGC`
-- Consider switching to Generational ZGC if not using it
+### Issue: Docker pull fails on VPS
 
-### Netty Buffer Leaks
 ```bash
-# Check logs for leak warnings
-docker-compose logs cache-master-1 | grep "LEAK"
+# On VPS, login to GHCR manually
+echo "YOUR_GITHUB_TOKEN" | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
 
-# Increase leak detection if needed
--Dio.netty.leakDetection.level=paranoid  # Very slow, use only for debugging
+# Pull image manually to test
+docker pull ghcr.io/YOUR_USERNAME/cache-node:latest
 ```
 
-### Out of Memory
-1. Check actual memory usage: `docker stats`
-2. Reduce heap if OOM is in container limit
-3. Increase container memory limit if heap is appropriate
+### Issue: Containers won't start
 
-### Cross-Server Communication Issues
 ```bash
-# Test connectivity from Server 1 to Server 2
-docker exec cache-master-1 ping <SERVER_2_IP>
-docker exec cache-master-1 telnet <SERVER_2_IP> 7002
-
-# Check firewall rules
-sudo ufw status
-sudo iptables -L
-```
-
-## Scaling Considerations
-
-### Vertical Scaling (More Resources)
-- Increase heap: `-Xmx4g` (masters only, if more RAM available)
-- Increase direct memory proportionally
-- Update `docker-compose.prod.yml` limits
-
-### Horizontal Scaling
-- Add more proxy instances (cheap)
-- Add more shards (requires rehashing)
-- Add more replicas per master
-
-## Backup and Recovery
-
-### Backup Data Volumes
-```bash
-# On each server
-docker run --rm -v cache-master-1-data:/data -v $(pwd):/backup alpine tar czf /backup/master-1-data.tar.gz /data
-```
-
-### Restore Data
-```bash
-docker run --rm -v cache-master-1-data:/data -v $(pwd):/backup alpine sh -c "cd /data && tar xzf /backup/master-1-data.tar.gz --strip 1"
-```
-
-## Performance Tuning Tips
-
-1. **Monitor ZGC performance**: Should see <1ms pauses
-2. **Netty buffer pool**: Monitor with `-Dio.netty.leakDetection.level=simple`
-3. **Network latency**: Keep servers in same datacenter/region
-4. **Disk I/O**: Use SSD for Docker volumes
-5. **CPU pinning**: Consider Docker CPU sets for cache nodes
-
-## Security Checklist
-
-- [ ] Change Grafana admin password
-- [ ] Setup firewall rules (only allow required ports)
-- [ ] Use private network for inter-server communication
-- [ ] Enable Docker content trust
-- [ ] Regular security updates
-- [ ] Monitor for suspicious activity
-
-## Maintenance
-
-### Update Deployment
-```bash
-# Pull new images
-docker-compose pull
-
-# Restart with zero downtime (one server at a time)
-docker-compose up -d --no-deps --build cache-master-1
-```
-
-### View Logs
-```bash
-# All logs
+# On VPS, check container logs
+cd ~/distributed-cache
 docker-compose logs -f
 
-# Specific service
-docker-compose logs -f cache-master-1
+# Check container status
+docker-compose ps
 
-# Last 100 lines
-docker-compose logs --tail=100 cache-master-1
-```
-
-### Restart Services
-```bash
 # Restart specific service
 docker-compose restart cache-master-1
-
-# Restart all on server
-docker-compose restart
 ```
+
+### Issue: Network connectivity between VPS servers
+
+```bash
+# On VPS1, test connection to VPS2
+telnet VPS2_IP 7002
+
+# On VPS2, test connection to VPS1
+telnet VPS1_IP 7000
+
+# Check firewall rules
+sudo ufw status verbose
+```
+
+## Rollback Procedure
+
+If deployment fails and you need to rollback:
+
+1. Find the previous successful deployment SHA from GitHub Actions history
+2. Go to **Actions** → **Deploy to Production**
+3. Click **Run workflow**
+4. In the branch field, enter the commit SHA of the previous version
+5. Click **Run workflow**
+
+Or manually on each VPS:
+
+```bash
+# On VPS, find previous image tag
+docker images | grep cache-node
+
+# Edit .env file and change TAG to previous version
+nano ~/distributed-cache/.env
+
+# Redeploy
+cd ~/distributed-cache
+docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+
+## Monitoring
+
+- **Prometheus**: http://VPS1_IP:9090
+- **Grafana**: http://VPS2_IP:3000
+  - Default credentials: `admin` / `<GRAFANA_PASSWORD>`
+  - Dashboards are pre-configured via provisioning
+
+## Security Considerations
+
+1. **Change default passwords**: Update Grafana admin password
+2. **Enable HTTPS**: Configure SSL/TLS certificates (see SSL.md for guide)
+3. **Restrict access**: Use VPN or IP whitelisting for monitoring interfaces
+4. **Rotate SSH keys**: Regularly rotate deployment SSH keys
+5. **Update dependencies**: Keep Docker images and base OS updated
+
+## Next Steps
+
+1. **Set up SSL/TLS**: Configure Let's Encrypt for HTTPS
+2. **Configure backups**: Set up automated backups for Docker volumes
+3. **Add alerting**: Configure Prometheus alerts and notification channels
+4. **Performance tuning**: Adjust JVM settings based on production metrics
+5. **Disaster recovery**: Document and test recovery procedures

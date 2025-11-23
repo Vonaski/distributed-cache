@@ -119,12 +119,12 @@ services:
       - NODE_ID=${MASTER_1_NODE_ID:-master-1}
       - NODE_PORT=${MASTER_1_CLIENT_PORT:-7000}
       - REPLICATION_PORT=${MASTER_1_REPLICATION_PORT:-7100}
-      - METRICS_PORT=${MASTER_1_METRICS_PORT:-8081}
+      - METRICS_PORT=9081
       - IS_MASTER=true
     ports:
       - "${MASTER_1_CLIENT_PORT:-7000}:7000"
       - "${MASTER_1_REPLICATION_PORT:-7100}:7100"
-      - "${MASTER_1_METRICS_PORT:-8081}:8081"
+      - "${MASTER_1_METRICS_PORT:-9081}:9081"
     volumes:
       - cache-master-1-data:/data
     networks:
@@ -140,12 +140,12 @@ services:
       - NODE_ID=${MASTER_2_NODE_ID:-master-2}
       - NODE_PORT=${MASTER_2_CLIENT_PORT:-7001}
       - REPLICATION_PORT=${MASTER_2_REPLICATION_PORT:-7101}
-      - METRICS_PORT=${MASTER_2_METRICS_PORT:-8082}
+      - METRICS_PORT=9082
       - IS_MASTER=true
     ports:
       - "${MASTER_2_CLIENT_PORT:-7001}:7001"
       - "${MASTER_2_REPLICATION_PORT:-7101}:7101"
-      - "${MASTER_2_METRICS_PORT:-8082}:8082"
+      - "${MASTER_2_METRICS_PORT:-9082}:9082"
     volumes:
       - cache-master-2-data:/data
     networks:
@@ -161,12 +161,12 @@ services:
       - NODE_ID=${MASTER_3_NODE_ID:-master-3}
       - NODE_PORT=${MASTER_3_CLIENT_PORT:-7002}
       - REPLICATION_PORT=${MASTER_3_REPLICATION_PORT:-7102}
-      - METRICS_PORT=${MASTER_3_METRICS_PORT:-8083}
+      - METRICS_PORT=9083
       - IS_MASTER=true
     ports:
       - "${MASTER_3_CLIENT_PORT:-7002}:7002"
       - "${MASTER_3_REPLICATION_PORT:-7102}:7102"
-      - "${MASTER_3_METRICS_PORT:-8083}:8083"
+      - "${MASTER_3_METRICS_PORT:-9083}:9083"
     volumes:
       - cache-master-3-data:/data
     networks:
@@ -185,14 +185,14 @@ services:
       - NODE_ID=${REPLICA_1_NODE_ID:-replica-1}
       - NODE_PORT=${REPLICA_1_CLIENT_PORT:-7003}
       - REPLICATION_PORT=${REPLICA_1_REPLICATION_PORT:-7103}
-      - METRICS_PORT=${REPLICA_1_METRICS_PORT:-8084}
+      - METRICS_PORT=9084
       - IS_MASTER=false
       - MASTER_HOST=${REPLICA_1_MASTER_HOST:-cache-master-1}
       - MASTER_PORT=${REPLICA_1_MASTER_PORT:-7100}
     ports:
       - "${REPLICA_1_CLIENT_PORT:-7003}:7003"
       - "${REPLICA_1_REPLICATION_PORT:-7103}:7103"
-      - "${REPLICA_1_METRICS_PORT:-8084}:8084"
+      - "${REPLICA_1_METRICS_PORT:-9084}:9084"
     volumes:
       - cache-replica-1-data:/data
     depends_on:
@@ -210,14 +210,14 @@ services:
       - NODE_ID=${REPLICA_2_NODE_ID:-replica-2}
       - NODE_PORT=${REPLICA_2_CLIENT_PORT:-7004}
       - REPLICATION_PORT=${REPLICA_2_REPLICATION_PORT:-7104}
-      - METRICS_PORT=${REPLICA_2_METRICS_PORT:-8085}
+      - METRICS_PORT=9085
       - IS_MASTER=false
       - MASTER_HOST=${REPLICA_2_MASTER_HOST:-cache-master-2}
       - MASTER_PORT=${REPLICA_2_MASTER_PORT:-7101}
     ports:
       - "${REPLICA_2_CLIENT_PORT:-7004}:7004"
       - "${REPLICA_2_REPLICATION_PORT:-7104}:7104"
-      - "${REPLICA_2_METRICS_PORT:-8085}:8085"
+      - "${REPLICA_2_METRICS_PORT:-9085}:9085"
     volumes:
       - cache-replica-2-data:/data
     depends_on:
@@ -235,14 +235,14 @@ services:
       - NODE_ID=${REPLICA_3_NODE_ID:-replica-3}
       - NODE_PORT=${REPLICA_3_CLIENT_PORT:-7005}
       - REPLICATION_PORT=${REPLICA_3_REPLICATION_PORT:-7105}
-      - METRICS_PORT=${REPLICA_3_METRICS_PORT:-8086}
+      - METRICS_PORT=9086
       - IS_MASTER=false
       - MASTER_HOST=${REPLICA_3_MASTER_HOST:-cache-master-3}
       - MASTER_PORT=${REPLICA_3_MASTER_PORT:-7102}
     ports:
       - "${REPLICA_3_CLIENT_PORT:-7005}:7005"
       - "${REPLICA_3_REPLICATION_PORT:-7105}:7105"
-      - "${REPLICA_3_METRICS_PORT:-8086}:8086"
+      - "${REPLICA_3_METRICS_PORT:-9086}:9086"
     volumes:
       - cache-replica-3-data:/data
     depends_on:

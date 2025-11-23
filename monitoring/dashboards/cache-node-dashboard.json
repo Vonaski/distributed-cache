@@ -1,132 +1,131 @@
 {
-  "dashboard": {
-    "title": "Cache Node Monitoring",
-    "tags": ["cache", "cache-node"],
-    "timezone": "browser",
-    "panels": [
-      {
-        "id": 1,
-        "title": "Cache Hit Rate",
-        "type": "gauge",
-        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
-        "targets": [
-          {
-            "expr": "cache_hit_rate",
-            "legendFormat": "{{instance}}"
-          }
-        ],
-        "options": {
-          "minValue": 0,
-          "maxValue": 100,
-          "thresholds": [
-            {"value": 0, "color": "red"},
-            {"value": 50, "color": "yellow"},
-            {"value": 80, "color": "green"}
-          ]
+  "title": "Cache Node Monitoring",
+  "tags": ["cache", "cache-node"],
+  "timezone": "browser",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Cache Hit Rate",
+      "type": "gauge",
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "cache_hit_rate",
+          "legendFormat": "{{instance}}"
         }
-      },
-      {
-        "id": 2,
-        "title": "Cache Size",
-        "type": "stat",
-        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0},
-        "targets": [
-          {
-            "expr": "cache_size",
-            "legendFormat": "{{instance}}"
-          }
-        ]
-      },
-      {
-        "id": 3,
-        "title": "Total Evictions",
-        "type": "stat",
-        "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0},
-        "targets": [
-          {
-            "expr": "sum(cache_evictions_total)",
-            "legendFormat": "Evictions"
-          }
-        ],
-        "options": {
-          "colorMode": "value"
-        }
-      },
-      {
-        "id": 4,
-        "title": "Cache Hits vs Misses",
-        "type": "graph",
-        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
-        "targets": [
-          {
-            "expr": "rate(cache_hits_total[1m])",
-            "legendFormat": "Hits/sec - {{instance}}"
-          },
-          {
-            "expr": "rate(cache_misses_total[1m])",
-            "legendFormat": "Misses/sec - {{instance}}"
-          }
-        ]
-      },
-      {
-        "id": 5,
-        "title": "Eviction Rate",
-        "type": "graph",
-        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
-        "targets": [
-          {
-            "expr": "rate(cache_evictions_total[1m])",
-            "legendFormat": "Evictions/sec - {{instance}}"
-          }
-        ]
-      },
-      {
-        "id": 6,
-        "title": "GET Operation Latency",
-        "type": "graph",
-        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
-        "targets": [
-          {
-            "expr": "histogram_quantile(0.95, rate(cache_get_duration_seconds_bucket[5m]))",
-            "legendFormat": "p95 - {{instance}}"
-          },
-          {
-            "expr": "histogram_quantile(0.99, rate(cache_get_duration_seconds_bucket[5m]))",
-            "legendFormat": "p99 - {{instance}}"
-          }
-        ]
-      },
-      {
-        "id": 7,
-        "title": "PUT Operation Latency",
-        "type": "graph",
-        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
-        "targets": [
-          {
-            "expr": "histogram_quantile(0.95, rate(cache_put_duration_seconds_bucket[5m]))",
-            "legendFormat": "p95 - {{instance}}"
-          },
-          {
-            "expr": "histogram_quantile(0.99, rate(cache_put_duration_seconds_bucket[5m]))",
-            "legendFormat": "p99 - {{instance}}"
-          }
-        ]
-      },
-      {
-        "id": 8,
-        "title": "Cache Size Over Time",
-        "type": "graph",
-        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24},
-        "targets": [
-          {
-            "expr": "cache_size",
-            "legendFormat": "{{instance}}"
-          }
+      ],
+      "options": {
+        "minValue": 0,
+        "maxValue": 100,
+        "thresholds": [
+          {"value": 0, "color": "red"},
+          {"value": 50, "color": "yellow"},
+          {"value": 80, "color": "green"}
         ]
       }
-    ],
-    "refresh": "5s",
-    "schemaVersion": 27,
-    "version": 1
-  }
+    },
+    {
+      "id": 2,
+      "title": "Cache Size",
+      "type": "stat",
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0},
+      "targets": [
+        {
+          "expr": "cache_size",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Total Evictions",
+      "type": "stat",
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0},
+      "targets": [
+        {
+          "expr": "sum(cache_evictions_total)",
+          "legendFormat": "Evictions"
+        }
+      ],
+      "options": {
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 4,
+      "title": "Cache Hits vs Misses",
+      "type": "graph",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {
+          "expr": "rate(cache_hits_total[1m])",
+          "legendFormat": "Hits/sec - {{instance}}"
+        },
+        {
+          "expr": "rate(cache_misses_total[1m])",
+          "legendFormat": "Misses/sec - {{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Eviction Rate",
+      "type": "graph",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {
+          "expr": "rate(cache_evictions_total[1m])",
+          "legendFormat": "Evictions/sec - {{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "GET Operation Latency",
+      "type": "graph",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(cache_get_duration_seconds_bucket[5m]))",
+          "legendFormat": "p95 - {{instance}}"
+        },
+        {
+          "expr": "histogram_quantile(0.99, rate(cache_get_duration_seconds_bucket[5m]))",
+          "legendFormat": "p99 - {{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "PUT Operation Latency",
+      "type": "graph",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(cache_put_duration_seconds_bucket[5m]))",
+          "legendFormat": "p95 - {{instance}}"
+        },
+        {
+          "expr": "histogram_quantile(0.99, rate(cache_put_duration_seconds_bucket[5m]))",
+          "legendFormat": "p99 - {{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Cache Size Over Time",
+      "type": "graph",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24},
+      "targets": [
+        {
+          "expr": "cache_size",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 27,
+  "version": 1,
+  "uid": "cache-node-dashboard"
 }

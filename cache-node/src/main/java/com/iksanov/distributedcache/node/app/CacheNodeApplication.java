@@ -66,9 +66,9 @@ public class CacheNodeApplication {
             cache = new InMemoryCacheStore(config.cacheMaxSize(), config.cacheTtlMillis(), 5000, cacheMetrics);
             log.info("[OK] Cache initialized (size={})", config.cacheMaxSize());
 
-            metricsServer = new MetricsServer(8081, cacheMetrics, netMetrics, replicationMetrics);
+            metricsServer = new MetricsServer(config.metricsPort(), cacheMetrics, netMetrics, replicationMetrics);
             metricsServer.start();
-            log.info("[OK] Metrics server started on port 8081");
+            log.info("[OK] Metrics server started on port {}", config.metricsPort());
 
             if (config.clusterEnabled()) {
                 replicationManager = initCluster();
@@ -84,7 +84,7 @@ public class CacheNodeApplication {
             log.info("========================================");
             log.info("[SUCCESS] CacheNode ready!");
             log.info("  Cache port: {}", config.port());
-            log.info("  Metrics port: 8081");
+            log.info("  Metrics port: {}", config.metricsPort());
             log.info("========================================");
 
         } catch (Exception e) {

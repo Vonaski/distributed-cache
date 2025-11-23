@@ -1,9 +1,8 @@
 {
-  "dashboard": {
-    "title": "Cache Proxy Monitoring",
-    "tags": ["cache", "proxy"],
-    "timezone": "browser",
-    "panels": [
+  "title": "Cache Proxy Monitoring",
+  "tags": ["cache", "proxy"],
+  "timezone": "browser",
+  "panels": [
       {
         "id": 1,
         "title": "Total Requests",
@@ -121,9 +120,9 @@
           ]
         }
       }
-    ],
-    "refresh": "5s",
-    "schemaVersion": 27,
-    "version": 1
-  }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 27,
+  "version": 1,
+  "uid": "proxy-dashboard"
 }
