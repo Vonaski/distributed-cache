@@ -28,9 +28,7 @@ jobs:
     name: Deploy to VPS 1
     runs-on: ubuntu-latest
     if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
-    environment:
-      name: production-vps1
-      url: http://${{ secrets.VPS1_HOST }}
+    environment: production-vps1
 
     steps:
       - name: Checkout code
@@ -252,9 +250,7 @@ jobs:
     name: Deploy to VPS 2
     runs-on: ubuntu-latest
     if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
-    environment:
-      name: production-vps2
-      url: http://${{ secrets.VPS2_HOST }}
+    environment: production-vps2
 
     steps:
       - name: Checkout code
