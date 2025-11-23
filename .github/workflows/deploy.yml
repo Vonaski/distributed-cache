@@ -36,6 +36,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set lowercase repository name
+        id: repo
+        run: echo "name=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
       - name: Set image tag
         id: image_tag
         run: |
@@ -124,7 +128,7 @@ jobs:
           # Create .env file for VPS1
           cat > deploy-vps1/.env << EOF
           COMPOSE_PROJECT_NAME=distributed-cache
-          REGISTRY=${{ env.REGISTRY }}/${{ github.repository }}
+          REGISTRY=${{ env.REGISTRY }}/${{ steps.repo.outputs.name }}
           TAG=${{ github.ref_name }}-${{ steps.image_tag.outputs.tag }}
 
           # Nginx
@@ -256,6 +260,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set lowercase repository name
+        id: repo
+        run: echo "name=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
       - name: Set image tag
         id: image_tag
         run: |
@@ -278,7 +286,7 @@ jobs:
           # Create .env file for VPS2
           cat > deploy-vps2/.env << EOF
           COMPOSE_PROJECT_NAME=distributed-cache
-          REGISTRY=${{ env.REGISTRY }}/${{ github.repository }}
+          REGISTRY=${{ env.REGISTRY }}/${{ steps.repo.outputs.name }}
           TAG=${{ github.ref_name }}-${{ steps.image_tag.outputs.tag }}
 
           # Proxy
