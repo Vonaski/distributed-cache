@@ -127,7 +127,7 @@ jobs:
           cat > deploy-vps1/.env << EOF
           COMPOSE_PROJECT_NAME=distributed-cache
           REGISTRY=${{ env.REGISTRY }}/${{ steps.repo.outputs.name }}
-          TAG=${{ github.ref_name }}-${{ steps.image_tag.outputs.tag }}
+          TAG=sha-${{ steps.image_tag.outputs.tag }}
 
           # Nginx
           NGINX_PORT=80
@@ -283,7 +283,7 @@ jobs:
           cat > deploy-vps2/.env << EOF
           COMPOSE_PROJECT_NAME=distributed-cache
           REGISTRY=${{ env.REGISTRY }}/${{ steps.repo.outputs.name }}
-          TAG=${{ github.ref_name }}-${{ steps.image_tag.outputs.tag }}
+          TAG=sha-${{ steps.image_tag.outputs.tag }}
 
           # Proxy
           PROXY_3_PORT=8080
