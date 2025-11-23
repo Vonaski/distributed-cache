@@ -31,7 +31,7 @@ services:
   # Netty: pooled allocator with direct buffers
   # ============================================
   proxy-1:
-    image: ${REGISTRY}/cache-proxy:${TAG:-latest}
+    image: ${REGISTRY}/proxy:${TAG:-latest}
     build: null  # Don't build on production, use pre-built images
     environment:
       - JAVA_OPTS=-Xmx512m -Xms512m -XX:+UseZGC -XX:+ZGenerational -XX:MaxDirectMemorySize=128m -XX:+UnlockExperimentalVMOptions -XX:+UseStringDeduplication -Dio.netty.allocator.type=pooled -Dio.netty.maxDirectMemory=0 -Dio.netty.leakDetection.level=simple
@@ -50,7 +50,7 @@ services:
         max-file: "3"
 
   proxy-2:
-    image: ${REGISTRY}/cache-proxy:${TAG:-latest}
+    image: ${REGISTRY}/proxy:${TAG:-latest}
     build: null
     environment:
       - JAVA_OPTS=-Xmx512m -Xms512m -XX:+UseZGC -XX:+ZGenerational -XX:MaxDirectMemorySize=128m -XX:+UnlockExperimentalVMOptions -XX:+UseStringDeduplication -Dio.netty.allocator.type=pooled -Dio.netty.maxDirectMemory=0 -Dio.netty.leakDetection.level=simple
@@ -69,7 +69,7 @@ services:
         max-file: "3"
 
   proxy-3:
-    image: ${REGISTRY}/cache-proxy:${TAG:-latest}
+    image: ${REGISTRY}/proxy:${TAG:-latest}
     build: null
     environment:
       - JAVA_OPTS=-Xmx512m -Xms512m -XX:+UseZGC -XX:+ZGenerational -XX:MaxDirectMemorySize=128m -XX:+UnlockExperimentalVMOptions -XX:+UseStringDeduplication -Dio.netty.allocator.type=pooled -Dio.netty.maxDirectMemory=0 -Dio.netty.leakDetection.level=simple

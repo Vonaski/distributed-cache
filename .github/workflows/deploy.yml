@@ -143,12 +143,12 @@ jobs:
           MASTER_1_NODE_ID=master-1
           MASTER_1_CLIENT_PORT=7000
           MASTER_1_REPLICATION_PORT=7100
-          MASTER_1_METRICS_PORT=8081
+          MASTER_1_METRICS_PORT=9081
 
           MASTER_2_NODE_ID=master-2
           MASTER_2_CLIENT_PORT=7001
           MASTER_2_REPLICATION_PORT=7101
-          MASTER_2_METRICS_PORT=8082
+          MASTER_2_METRICS_PORT=9082
 
           # Replica 3 (connects to Master 3 on VPS2)
           REPLICA_3_NODE_ID=replica-3
@@ -156,7 +156,7 @@ jobs:
           REPLICA_3_MASTER_PORT=7102
           REPLICA_3_CLIENT_PORT=7005
           REPLICA_3_REPLICATION_PORT=7105
-          REPLICA_3_METRICS_PORT=8086
+          REPLICA_3_METRICS_PORT=9086
 
           # Monitoring
           PROMETHEUS_PORT=9090
@@ -222,7 +222,7 @@ jobs:
             cd ~/distributed-cache
 
             # Login to GHCR
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u vonaski --password-stdin
 
             # Pull latest images
             docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.vps1.yml pull
@@ -295,7 +295,7 @@ jobs:
           MASTER_3_NODE_ID=master-3
           MASTER_3_CLIENT_PORT=7002
           MASTER_3_REPLICATION_PORT=7102
-          MASTER_3_METRICS_PORT=8083
+          MASTER_3_METRICS_PORT=9083
 
           # Replica 1 (connects to Master 1 on VPS1)
           REPLICA_1_NODE_ID=replica-1
@@ -303,7 +303,7 @@ jobs:
           REPLICA_1_MASTER_PORT=7100
           REPLICA_1_CLIENT_PORT=7003
           REPLICA_1_REPLICATION_PORT=7103
-          REPLICA_1_METRICS_PORT=8084
+          REPLICA_1_METRICS_PORT=9084
 
           # Replica 2 (connects to Master 2 on VPS1)
           REPLICA_2_NODE_ID=replica-2
@@ -311,7 +311,7 @@ jobs:
           REPLICA_2_MASTER_PORT=7101
           REPLICA_2_CLIENT_PORT=7004
           REPLICA_2_REPLICATION_PORT=7104
-          REPLICA_2_METRICS_PORT=8085
+          REPLICA_2_METRICS_PORT=9085
 
           # Monitoring
           GRAFANA_PORT=3000
@@ -380,7 +380,7 @@ jobs:
             cd ~/distributed-cache
 
             # Login to GHCR
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u vonaski --password-stdin
 
             # Pull latest images
             docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.vps2.yml pull
