@@ -136,3 +136,10 @@ lombok.config
 cache-node/local/
 proxy/local/
 common/local/
+
+############################
+# Personal notes & commands.txt
+############################
+commands.txt
+commands.txt
+COMMANDS.md
