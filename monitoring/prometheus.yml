@@ -3,35 +3,68 @@ global:
   evaluation_interval: 15s
 
 scrape_configs:
-  - job_name: 'proxy'
+  # VPS1 Proxies
+  - job_name: 'proxy-vps1'
     metrics_path: '/actuator/prometheus'
     static_configs:
       - targets:
           - 'proxy-1:8080'
           - 'proxy-2:8080'
-          - 'proxy-3:8080'
         labels:
           app: 'proxy'
+          vps: 'vps1'
 
-  - job_name: 'cache-master'
+  # VPS2 Proxy (via public IP)
+  - job_name: 'proxy-vps2'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets:
+          - '91.230.110.139:8080'
+        labels:
+          app: 'proxy'
+          vps: 'vps2'
+
+  # VPS1 Cache Masters
+  - job_name: 'cache-master-vps1'
     metrics_path: '/metrics'
     static_configs:
       - targets:
           - 'cache-master-1:9081'
           - 'cache-master-2:9082'
-          - 'cache-master-3:9083'
         labels:
           app: 'cache-master'
+          vps: 'vps1'
 
-  - job_name: 'cache-replica'
+  # VPS2 Cache Master (via public IP)
+  - job_name: 'cache-master-vps2'
     metrics_path: '/metrics'
     static_configs:
       - targets:
-          - 'cache-replica-1:9084'
-          - 'cache-replica-2:9085'
+          - '91.230.110.139:9083'
+        labels:
+          app: 'cache-master'
+          vps: 'vps2'
+
+  # VPS1 Cache Replica
+  - job_name: 'cache-replica-vps1'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets:
           - 'cache-replica-3:9086'
         labels:
           app: 'cache-replica'
+          vps: 'vps1'
+
+  # VPS2 Cache Replicas (via public IP)
+  - job_name: 'cache-replica-vps2'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets:
+          - '91.230.110.139:9084'
+          - '91.230.110.139:9085'
+        labels:
+          app: 'cache-replica'
+          vps: 'vps2'
 
   - job_name: 'prometheus'
     static_configs:
