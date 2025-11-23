@@ -38,7 +38,7 @@ jobs:
 
       - name: Set image tag
         id: image_tag
-        run: |
+        run: |Об
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
           else
@@ -124,8 +124,8 @@ jobs:
           # Create .env file for VPS1
           cat > deploy-vps1/.env << EOF
           COMPOSE_PROJECT_NAME=distributed-cache
-          REGISTRY=${{ env.REGISTRY }}/${{ github.repository_owner }}
-          TAG=${{ steps.image_tag.outputs.tag }}
+          REGISTRY=${{ env.REGISTRY }}/${{ github.repository }}
+          TAG=${{ github.ref_name }}-${{ steps.image_tag.outputs.tag }}
 
           # Nginx
           NGINX_PORT=80
@@ -278,8 +278,8 @@ jobs:
           # Create .env file for VPS2
           cat > deploy-vps2/.env << EOF
           COMPOSE_PROJECT_NAME=distributed-cache
-          REGISTRY=${{ env.REGISTRY }}/${{ github.repository_owner }}
-          TAG=${{ steps.image_tag.outputs.tag }}
+          REGISTRY=${{ env.REGISTRY }}/${{ github.repository }}
+          TAG=${{ github.ref_name }}-${{ steps.image_tag.outputs.tag }}
 
           # Proxy
           PROXY_3_PORT=8080
