@@ -38,7 +38,7 @@ jobs:
 
       - name: Set image tag
         id: image_tag
-        run: |Об
+        run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
           else
