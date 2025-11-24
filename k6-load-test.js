@@ -38,7 +38,7 @@ export const options = {
     },
 };
 
-const BASE_URL = 'http://localhost'; // Nginx load balancer
+const BASE_URL = __ENV.BASE_URL || 'http://45.14.194.8'; // Nginx load balancer
 
 // Generate random key for cache operations
 function randomKey() {
@@ -117,6 +117,7 @@ function getOperation(key) {
 
     const params = {
         tags: { operation: 'GET' },
+        responseCallback: http.expectedStatuses(200, 404), // 404 is OK for cache miss
     };
 
     const response = http.get(`${BASE_URL}/api/cache/${key}`, params);
@@ -151,6 +152,7 @@ function deleteOperation(key) {
 
     const params = {
         tags: { operation: 'DELETE' },
+        responseCallback: http.expectedStatuses(200, 404), // 404 is OK if key doesn't exist
     };
 
     const response = http.del(`${BASE_URL}/api/cache/${key}`, null, params);
@@ -178,8 +180,9 @@ export function setup() {
     console.log(`Target: ${BASE_URL}`);
     console.log('Pre-populating cache with initial data...');
 
-    // Pre-populate cache with fewer keys for faster setup
-    for (let i = 0; i < 500; i++) {
+    // Pre-populate cache with fewer keys for faster setup (reduced from 500 to 50)
+    // This is enough to test cache hits without timing out
+    for (let i = 0; i < 50; i++) {
         const key = `prepopulated_key_${i}`;
         const value = `prepopulated_value_${i}`;
         http.put(

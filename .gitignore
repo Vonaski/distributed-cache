@@ -141,5 +141,11 @@ common/local/
 # Personal notes & commands.txt
 ############################
 commands.txt
-commands.txt
 COMMANDS.md
+
+############################
+# K6 Load Testing
+############################
+k6-load-test*.js
+test-results.json
+*.har
