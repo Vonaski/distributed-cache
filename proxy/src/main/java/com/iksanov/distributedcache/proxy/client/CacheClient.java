@@ -13,7 +13,6 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
 import io.netty.handler.codec.LengthFieldPrepender;
-import io.netty.handler.timeout.ReadTimeoutHandler;
 import io.netty.util.AttributeKey;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -101,7 +100,6 @@ public class CacheClient {
                                 .addLast(new LengthFieldBasedFrameDecoder(65536, 0, 4, 0, 4))
                                 .addLast(new LengthFieldPrepender(4))
                                 .addLast(new CacheMessageCodec())
-                                .addLast(new ReadTimeoutHandler(config.getConnection().getTimeoutMillis(), TimeUnit.MILLISECONDS))
                                 .addLast(handler);
                         }
                     })
