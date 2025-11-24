@@ -69,9 +69,9 @@ jobs:
               upstream cache_proxy_backend {
                   least_conn;
 
-                  # Proxy-1 and Proxy-2 on VPS1 (localhost for Nginx)
-                  server 127.0.0.1:8080 max_fails=3 fail_timeout=30s;
-                  server 127.0.0.1:8081 max_fails=3 fail_timeout=30s;
+                  # Proxy-1 and Proxy-2 on VPS1 (use container names)
+                  server proxy-1:8080 max_fails=3 fail_timeout=30s;
+                  server proxy-2:8080 max_fails=3 fail_timeout=30s;
 
                   # Proxy-3 on VPS2 (public IP)
                   server ${{ secrets.VPS2_HOST }}:8080 max_fails=3 fail_timeout=30s;
