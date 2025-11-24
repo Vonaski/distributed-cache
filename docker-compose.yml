@@ -116,11 +116,15 @@ services:
       dockerfile: ./cache-node/Dockerfile
     container_name: cache-master-1
     environment:
-      - NODE_ID=${MASTER_1_NODE_ID:-master-1}
-      - NODE_PORT=${MASTER_1_CLIENT_PORT:-7000}
-      - REPLICATION_PORT=${MASTER_1_REPLICATION_PORT:-7100}
+      - CACHE_NODE_ID=${MASTER_1_NODE_ID:-master-1}
+      - CACHE_NODE_HOST=0.0.0.0
+      - CACHE_NODE_PORT=${MASTER_1_CLIENT_PORT:-7000}
+      - CACHE_NODE_REPLICATION_PORT=${MASTER_1_REPLICATION_PORT:-7100}
       - METRICS_PORT=9081
-      - IS_MASTER=true
+      - CACHE_CLUSTER_ENABLED=true
+      - CACHE_CLUSTER_NODES=${MASTER_1_REPLICAS}
+      - CACHE_NODE_ROLE=MASTER
+      - CACHE_NODE_PRIORITY=0
     ports:
       - "${MASTER_1_CLIENT_PORT:-7000}:7000"
       - "${MASTER_1_REPLICATION_PORT:-7100}:7100"
@@ -137,11 +141,15 @@ services:
       dockerfile: ./cache-node/Dockerfile
     container_name: cache-master-2
     environment:
-      - NODE_ID=${MASTER_2_NODE_ID:-master-2}
-      - NODE_PORT=${MASTER_2_CLIENT_PORT:-7001}
-      - REPLICATION_PORT=${MASTER_2_REPLICATION_PORT:-7101}
+      - CACHE_NODE_ID=${MASTER_2_NODE_ID:-master-2}
+      - CACHE_NODE_HOST=0.0.0.0
+      - CACHE_NODE_PORT=${MASTER_2_CLIENT_PORT:-7001}
+      - CACHE_NODE_REPLICATION_PORT=${MASTER_2_REPLICATION_PORT:-7101}
       - METRICS_PORT=9082
-      - IS_MASTER=true
+      - CACHE_CLUSTER_ENABLED=true
+      - CACHE_CLUSTER_NODES=${MASTER_2_REPLICAS}
+      - CACHE_NODE_ROLE=MASTER
+      - CACHE_NODE_PRIORITY=0
     ports:
       - "${MASTER_2_CLIENT_PORT:-7001}:7001"
       - "${MASTER_2_REPLICATION_PORT:-7101}:7101"
@@ -158,11 +166,15 @@ services:
       dockerfile: ./cache-node/Dockerfile
     container_name: cache-master-3
     environment:
-      - NODE_ID=${MASTER_3_NODE_ID:-master-3}
-      - NODE_PORT=${MASTER_3_CLIENT_PORT:-7002}
-      - REPLICATION_PORT=${MASTER_3_REPLICATION_PORT:-7102}
+      - CACHE_NODE_ID=${MASTER_3_NODE_ID:-master-3}
+      - CACHE_NODE_HOST=0.0.0.0
+      - CACHE_NODE_PORT=${MASTER_3_CLIENT_PORT:-7002}
+      - CACHE_NODE_REPLICATION_PORT=${MASTER_3_REPLICATION_PORT:-7102}
       - METRICS_PORT=9083
-      - IS_MASTER=true
+      - CACHE_CLUSTER_ENABLED=true
+      - CACHE_CLUSTER_NODES=${MASTER_3_REPLICAS}
+      - CACHE_NODE_ROLE=MASTER
+      - CACHE_NODE_PRIORITY=0
     ports:
       - "${MASTER_3_CLIENT_PORT:-7002}:7002"
       - "${MASTER_3_REPLICATION_PORT:-7102}:7102"
@@ -182,13 +194,15 @@ services:
       dockerfile: ./cache-node/Dockerfile
     container_name: cache-replica-1
     environment:
-      - NODE_ID=${REPLICA_1_NODE_ID:-replica-1}
-      - NODE_PORT=${REPLICA_1_CLIENT_PORT:-7003}
-      - REPLICATION_PORT=${REPLICA_1_REPLICATION_PORT:-7103}
+      - CACHE_NODE_ID=${REPLICA_1_NODE_ID:-replica-1}
+      - CACHE_NODE_HOST=0.0.0.0
+      - CACHE_NODE_PORT=${REPLICA_1_CLIENT_PORT:-7003}
+      - CACHE_NODE_REPLICATION_PORT=${REPLICA_1_REPLICATION_PORT:-7103}
       - METRICS_PORT=9084
-      - IS_MASTER=false
-      - MASTER_HOST=${REPLICA_1_MASTER_HOST:-cache-master-1}
-      - MASTER_PORT=${REPLICA_1_MASTER_PORT:-7100}
+      - CACHE_CLUSTER_ENABLED=true
+      - CACHE_CLUSTER_NODES=master-1:${REPLICA_1_MASTER_HOST:-cache-master-1}:7000:${REPLICA_1_MASTER_PORT:-7100}
+      - CACHE_NODE_ROLE=REPLICA
+      - CACHE_NODE_PRIORITY=1
     ports:
       - "${REPLICA_1_CLIENT_PORT:-7003}:7003"
       - "${REPLICA_1_REPLICATION_PORT:-7103}:7103"
@@ -207,13 +221,15 @@ services:
       dockerfile: ./cache-node/Dockerfile
     container_name: cache-replica-2
     environment:
-      - NODE_ID=${REPLICA_2_NODE_ID:-replica-2}
-      - NODE_PORT=${REPLICA_2_CLIENT_PORT:-7004}
-      - REPLICATION_PORT=${REPLICA_2_REPLICATION_PORT:-7104}
+      - CACHE_NODE_ID=${REPLICA_2_NODE_ID:-replica-2}
+      - CACHE_NODE_HOST=0.0.0.0
+      - CACHE_NODE_PORT=${REPLICA_2_CLIENT_PORT:-7004}
+      - CACHE_NODE_REPLICATION_PORT=${REPLICA_2_REPLICATION_PORT:-7104}
       - METRICS_PORT=9085
-      - IS_MASTER=false
-      - MASTER_HOST=${REPLICA_2_MASTER_HOST:-cache-master-2}
-      - MASTER_PORT=${REPLICA_2_MASTER_PORT:-7101}
+      - CACHE_CLUSTER_ENABLED=true
+      - CACHE_CLUSTER_NODES=master-2:${REPLICA_2_MASTER_HOST:-cache-master-2}:7001:${REPLICA_2_MASTER_PORT:-7101}
+      - CACHE_NODE_ROLE=REPLICA
+      - CACHE_NODE_PRIORITY=1
     ports:
       - "${REPLICA_2_CLIENT_PORT:-7004}:7004"
       - "${REPLICA_2_REPLICATION_PORT:-7104}:7104"
@@ -232,13 +248,15 @@ services:
       dockerfile: ./cache-node/Dockerfile
     container_name: cache-replica-3
     environment:
-      - NODE_ID=${REPLICA_3_NODE_ID:-replica-3}
-      - NODE_PORT=${REPLICA_3_CLIENT_PORT:-7005}
-      - REPLICATION_PORT=${REPLICA_3_REPLICATION_PORT:-7105}
+      - CACHE_NODE_ID=${REPLICA_3_NODE_ID:-replica-3}
+      - CACHE_NODE_HOST=0.0.0.0
+      - CACHE_NODE_PORT=${REPLICA_3_CLIENT_PORT:-7005}
+      - CACHE_NODE_REPLICATION_PORT=${REPLICA_3_REPLICATION_PORT:-7105}
       - METRICS_PORT=9086
-      - IS_MASTER=false
-      - MASTER_HOST=${REPLICA_3_MASTER_HOST:-cache-master-3}
-      - MASTER_PORT=${REPLICA_3_MASTER_PORT:-7102}
+      - CACHE_CLUSTER_ENABLED=true
+      - CACHE_CLUSTER_NODES=master-3:${REPLICA_3_MASTER_HOST:-cache-master-3}:7002:${REPLICA_3_MASTER_PORT:-7102}
+      - CACHE_NODE_ROLE=REPLICA
+      - CACHE_NODE_PRIORITY=1
     ports:
       - "${REPLICA_3_CLIENT_PORT:-7005}:7005"
       - "${REPLICA_3_REPLICATION_PORT:-7105}:7105"

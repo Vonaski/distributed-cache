@@ -149,3 +149,9 @@ COMMANDS.md
 k6-load-test*.js
 test-results.json
 *.har
+
+############################
+# Test Scripts
+############################
+test-key-distribution.py
+test-failover.py
