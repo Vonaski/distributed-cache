@@ -227,8 +227,8 @@ jobs:
             # Pull latest images
             docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.vps1.yml pull
 
-            # Deploy with zero-downtime using rolling update
-            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.vps1.yml up -d --remove-orphans
+            # Force recreate containers with new images
+            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.vps1.yml up -d --force-recreate --remove-orphans
 
             # Clean up old images
             docker image prune -af --filter "until=24h"
@@ -385,8 +385,8 @@ jobs:
             # Pull latest images
             docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.vps2.yml pull
 
-            # Deploy with zero-downtime using rolling update
-            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.vps2.yml up -d --remove-orphans
+            # Force recreate containers with new images
+            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.vps2.yml up -d --force-recreate --remove-orphans
 
             # Clean up old images
             docker image prune -af --filter "until=24h"
