@@ -2,6 +2,13 @@
   "title": "Cache Node Monitoring",
   "tags": ["cache", "cache-node"],
   "timezone": "browser",
+  "editable": true,
+  "graphTooltip": 1,
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "refresh": "10s",
   "panels": [
     {
       "id": 1,
@@ -10,18 +17,25 @@
       "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
       "targets": [
         {
-          "expr": "cache_hit_rate",
-          "legendFormat": "{{instance}}"
+          "expr": "avg(cache_hit_rate{app=~\"cache-master|cache-replica\"})",
+          "legendFormat": "Hit Rate %",
+          "refId": "A"
         }
       ],
-      "options": {
-        "minValue": 0,
-        "maxValue": 100,
-        "thresholds": [
-          {"value": 0, "color": "red"},
-          {"value": 50, "color": "yellow"},
-          {"value": 80, "color": "green"}
-        ]
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"value": 0, "color": "red"},
+              {"value": 50, "color": "yellow"},
+              {"value": 80, "color": "green"}
+            ]
+          }
+        }
       }
     },
     {
@@ -31,10 +45,17 @@
       "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0},
       "targets": [
         {
-          "expr": "cache_size",
-          "legendFormat": "{{instance}}"
+          "expr": "sum(cache_size{app=~\"cache-master|cache-replica\"})",
+          "legendFormat": "Total Items",
+          "refId": "A"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        }
+      }
     },
     {
       "id": 3,
@@ -43,89 +64,158 @@
       "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0},
       "targets": [
         {
-          "expr": "sum(cache_evictions_total)",
-          "legendFormat": "Evictions"
+          "expr": "sum(cache_evictions{app=~\"cache-master|cache-replica\"})",
+          "legendFormat": "Evictions",
+          "refId": "A"
         }
       ],
-      "options": {
-        "colorMode": "value"
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"value": 0, "color": "green"},
+              {"value": 100, "color": "yellow"},
+              {"value": 1000, "color": "red"}
+            ]
+          }
+        }
       }
     },
     {
       "id": 4,
       "title": "Cache Hits vs Misses",
-      "type": "graph",
+      "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
       "targets": [
         {
-          "expr": "rate(cache_hits_total[1m])",
-          "legendFormat": "Hits/sec - {{instance}}"
+          "expr": "sum by (instance, vps) (rate(cache_hits{app=~\"cache-master|cache-replica\"}[1m]))",
+          "legendFormat": "{{vps}} - {{instance}} - Hits",
+          "refId": "A"
         },
         {
-          "expr": "rate(cache_misses_total[1m])",
-          "legendFormat": "Misses/sec - {{instance}}"
+          "expr": "sum by (instance, vps) (rate(cache_misses{app=~\"cache-master|cache-replica\"}[1m]))",
+          "legendFormat": "{{vps}} - {{instance}} - Misses",
+          "refId": "B"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10
+          }
+        }
+      }
     },
     {
       "id": 5,
       "title": "Eviction Rate",
-      "type": "graph",
+      "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
       "targets": [
         {
-          "expr": "rate(cache_evictions_total[1m])",
-          "legendFormat": "Evictions/sec - {{instance}}"
+          "expr": "sum by (instance, vps) (rate(cache_evictions{app=~\"cache-master|cache-replica\"}[1m]))",
+          "legendFormat": "{{vps}} - {{instance}}",
+          "refId": "A"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10
+          }
+        }
+      }
     },
     {
       "id": 6,
       "title": "GET Operation Latency",
-      "type": "graph",
+      "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, rate(cache_get_duration_seconds_bucket[5m]))",
-          "legendFormat": "p95 - {{instance}}"
+          "expr": "histogram_quantile(0.95, sum by (instance, le) (rate(cache_get_duration_bucket{app=~\"cache-master|cache-replica\"}[5m])))",
+          "legendFormat": "{{instance}} - p95",
+          "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.99, rate(cache_get_duration_seconds_bucket[5m]))",
-          "legendFormat": "p99 - {{instance}}"
+          "expr": "histogram_quantile(0.99, sum by (instance, le) (rate(cache_get_duration_bucket{app=~\"cache-master|cache-replica\"}[5m])))",
+          "legendFormat": "{{instance}} - p99",
+          "refId": "B"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 4,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10
+          }
+        }
+      }
     },
     {
       "id": 7,
       "title": "PUT Operation Latency",
-      "type": "graph",
+      "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, rate(cache_put_duration_seconds_bucket[5m]))",
-          "legendFormat": "p95 - {{instance}}"
+          "expr": "histogram_quantile(0.95, sum by (instance, le) (rate(cache_put_duration_bucket{app=~\"cache-master|cache-replica\"}[5m])))",
+          "legendFormat": "{{instance}} - p95",
+          "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.99, rate(cache_put_duration_seconds_bucket[5m]))",
-          "legendFormat": "p99 - {{instance}}"
+          "expr": "histogram_quantile(0.99, sum by (instance, le) (rate(cache_put_duration_bucket{app=~\"cache-master|cache-replica\"}[5m])))",
+          "legendFormat": "{{instance}} - p99",
+          "refId": "B"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 4,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10
+          }
+        }
+      }
     },
     {
       "id": 8,
       "title": "Cache Size Over Time",
-      "type": "graph",
+      "type": "timeseries",
       "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24},
       "targets": [
         {
-          "expr": "cache_size",
-          "legendFormat": "{{instance}}"
+          "expr": "cache_size{app=~\"cache-master|cache-replica\"}",
+          "legendFormat": "{{vps}} - {{instance}}",
+          "refId": "A"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10
+          }
+        }
+      }
     }
-  ],
-  "refresh": "5s",
-  "schemaVersion": 27,
-  "version": 1,
-  "uid": "cache-node-dashboard"
+  ]
 }

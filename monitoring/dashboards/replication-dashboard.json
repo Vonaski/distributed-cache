@@ -106,7 +106,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "rate(replication_sent_total[5m])",
+          "expr": "sum by (instance, vps) (rate(replication_sent_total{app=~\"cache-master|cache-replica\"}[5m]))",
           "legendFormat": "Sent",
           "range": true,
           "refId": "A"
@@ -117,7 +117,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "rate(replication_received_total[5m])",
+          "expr": "sum by (instance, vps) (rate(replication_received_total{app=~\"cache-master|cache-replica\"}[5m]))",
           "hide": false,
           "legendFormat": "Received",
           "range": true,
