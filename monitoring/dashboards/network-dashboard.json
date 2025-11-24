@@ -1,29 +1,202 @@
 {
   "uid": "net-metrics",
   "title": "Network Metrics (Netty + Cache Node)",
+  "tags": ["cache", "network", "netty"],
+  "timezone": "browser",
+  "editable": true,
+  "graphTooltip": 1,
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "refresh": "10s",
   "panels": [
     {
-      "type": "graph",
+      "id": 1,
+      "type": "timeseries",
       "title": "Request Rate (RPS)",
-      "targets": [{ "expr": "rate(net_requests_total[1m])", "legendFormat": "{{instance}}" }]
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "sum by (instance, vps) (rate(net_requests_total{app=~\"cache-master|cache-replica\"}[1m]))",
+          "legendFormat": "{{vps}} - {{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10
+          }
+        }
+      }
     },
     {
-      "type": "graph",
+      "id": 2,
+      "type": "timeseries",
       "title": "Active Connections",
-      "targets": [{ "expr": "net_connections_active", "legendFormat": "{{instance}}" }]
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "expr": "net_connections_active{app=~\"cache-master|cache-replica\"}",
+          "legendFormat": "{{vps}} - {{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10
+          }
+        }
+      }
     },
     {
-      "type": "graph",
+      "id": 3,
+      "type": "timeseries",
       "title": "Error Rate",
-      "targets": [{ "expr": "rate(net_requests_errors[1m])", "legendFormat": "{{instance}}" }]
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {
+          "expr": "sum by (instance, vps) (rate(net_requests_errors{app=~\"cache-master|cache-replica\"}[1m]))",
+          "legendFormat": "{{vps}} - {{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10
+          },
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"value": 0, "color": "green"},
+              {"value": 0.1, "color": "yellow"},
+              {"value": 1, "color": "red"}
+            ]
+          }
+        }
+      }
     },
     {
-      "type": "graph",
-      "title": "Request Duration (avg)",
-      "targets": [{ "expr": "rate(net_request_duration_seconds_sum[5m]) / rate(net_request_duration_seconds_count[5m])", "legendFormat": "{{instance}}" }]
+      "id": 4,
+      "type": "timeseries",
+      "title": "Request Duration (p95, p99)",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (instance, le) (rate(net_request_duration_bucket{app=~\"cache-master|cache-replica\"}[5m])))",
+          "legendFormat": "{{instance}} - p95",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (instance, le) (rate(net_request_duration_bucket{app=~\"cache-master|cache-replica\"}[5m])))",
+          "legendFormat": "{{instance}} - p99",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 4,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Connection Events",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "targets": [
+        {
+          "expr": "sum by (instance) (rate(net_connections_total{app=~\"cache-master|cache-replica\"}[1m]))",
+          "legendFormat": "{{instance}} - Opened",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (instance) (rate(net_connections_closed{app=~\"cache-master|cache-replica\"}[1m]))",
+          "legendFormat": "{{instance}} - Closed",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Server Startups/Shutdowns",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "targets": [
+        {
+          "expr": "sum(net_server_startups{app=~\"cache-master|cache-replica\"})",
+          "legendFormat": "Startups",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(net_server_shutdowns{app=~\"cache-master|cache-replica\"})",
+          "legendFormat": "Shutdowns",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Total Requests & Responses",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24},
+      "targets": [
+        {
+          "expr": "sum by (instance) (rate(net_requests_total{app=~\"cache-master|cache-replica\"}[1m]))",
+          "legendFormat": "{{instance}} - Requests",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (instance) (rate(net_responses_total{app=~\"cache-master|cache-replica\"}[1m]))",
+          "legendFormat": "{{instance}} - Responses",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10
+          }
+        }
+      }
     }
-  ],
-  "refresh": "5s",
-  "schemaVersion": 27,
-  "version": 1
+  ]
 }
