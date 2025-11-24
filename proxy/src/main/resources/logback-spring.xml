@@ -13,6 +13,8 @@
     <appender name="LOKI" class="com.github.loki4j.logback.Loki4jAppender">
         <http>
             <url>http://91.230.110.139:3100/loki/api/v1/push</url>
+            <connectionTimeoutMs>5000</connectionTimeoutMs>
+            <requestTimeoutMs>10000</requestTimeoutMs>
         </http>
         <format>
             <label>
@@ -22,11 +24,23 @@
                 <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
             </message>
         </format>
+        <batchSize>1000</batchSize>
+        <batchTimeoutMs>5000</batchTimeoutMs>
+        <useDirectBuffers>true</useDirectBuffers>
+        <drainOnStop>true</drainOnStop>
+    </appender>
+
+    <!-- Async wrapper for LOKI to prevent blocking -->
+    <appender name="ASYNC_LOKI" class="ch.qos.logback.classic.AsyncAppender">
+        <appender-ref ref="LOKI"/>
+        <queueSize>1024</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <neverBlock>true</neverBlock>
     </appender>
 
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>
-        <appender-ref ref="LOKI"/>
+        <appender-ref ref="ASYNC_LOKI"/>
     </root>
 
     <logger name="com.iksanov.distributedcache.proxy" level="DEBUG"/>
