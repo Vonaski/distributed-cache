@@ -59,6 +59,16 @@ public class ReplicationMetrics {
 
         this.replicationDuration = Timer.builder("replication.duration")
                 .description("Time taken to replicate a task to all replicas")
+                .publishPercentileHistogram()
+                .serviceLevelObjectives(
+                    java.time.Duration.ofMillis(1),
+                    java.time.Duration.ofMillis(5),
+                    java.time.Duration.ofMillis(10),
+                    java.time.Duration.ofMillis(50),
+                    java.time.Duration.ofMillis(100),
+                    java.time.Duration.ofMillis(500),
+                    java.time.Duration.ofSeconds(1)
+                )
                 .register(registry);
 
         Gauge.builder("replication.connections.active", activeReplicationConnections, AtomicLong::get)

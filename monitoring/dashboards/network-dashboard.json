@@ -64,7 +64,7 @@
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
       "targets": [
         {
-          "expr": "sum by (instance, vps) (rate(net_requests_errors{app=~\"cache-master|cache-replica\"}[1m]))",
+          "expr": "sum by (instance, vps) (rate(net_requests_errors_total{app=~\"cache-master|cache-replica\"}[1m]))",
           "legendFormat": "{{vps}} - {{instance}}",
           "refId": "A"
         }
@@ -96,12 +96,12 @@
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (instance, le) (rate(net_request_duration_bucket{app=~\"cache-master|cache-replica\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (instance, le) (rate(net_request_duration_seconds_bucket{app=~\"cache-master|cache-replica\"}[5m])))",
           "legendFormat": "{{instance}} - p95",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.99, sum by (instance, le) (rate(net_request_duration_bucket{app=~\"cache-master|cache-replica\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (instance, le) (rate(net_request_duration_seconds_bucket{app=~\"cache-master|cache-replica\"}[5m])))",
           "legendFormat": "{{instance}} - p99",
           "refId": "B"
         }
@@ -153,12 +153,12 @@
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
       "targets": [
         {
-          "expr": "sum(net_server_startups{app=~\"cache-master|cache-replica\"})",
+          "expr": "sum(net_server_startups_total{app=~\"cache-master|cache-replica\"})",
           "legendFormat": "Startups",
           "refId": "A"
         },
         {
-          "expr": "sum(net_server_shutdowns{app=~\"cache-master|cache-replica\"})",
+          "expr": "sum(net_server_shutdowns_total{app=~\"cache-master|cache-replica\"})",
           "legendFormat": "Shutdowns",
           "refId": "B"
         }

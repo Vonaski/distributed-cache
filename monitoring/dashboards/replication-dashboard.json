@@ -186,7 +186,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "replication_tasks_pending",
+          "expr": "replication_tasks_pending{app=~\"cache-master|cache-replica\"}",
           "legendFormat": "Pending Tasks",
           "range": true,
           "refId": "A"
@@ -275,7 +275,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "replication_connections_active",
+          "expr": "replication_connections_active{app=~\"cache-master|cache-replica\"}",
           "legendFormat": "Active Connections",
           "range": true,
           "refId": "A"
@@ -367,7 +367,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.50, sum(rate(replication_duration_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.50, sum(rate(replication_duration_seconds_bucket{app=~\"cache-master|cache-replica\"}[5m])) by (le))",
           "legendFormat": "p50",
           "range": true,
           "refId": "A"
@@ -378,7 +378,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum(rate(replication_duration_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(replication_duration_seconds_bucket{app=~\"cache-master|cache-replica\"}[5m])) by (le))",
           "hide": false,
           "legendFormat": "p95",
           "range": true,
@@ -390,7 +390,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.99, sum(rate(replication_duration_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.99, sum(rate(replication_duration_seconds_bucket{app=~\"cache-master|cache-replica\"}[5m])) by (le))",
           "hide": false,
           "legendFormat": "p99",
           "range": true,
@@ -484,7 +484,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "rate(replication_failed_total[5m])",
+          "expr": "rate(replication_failed_total{app=~\"cache-master|cache-replica\"}[5m])",
           "legendFormat": "Failed",
           "range": true,
           "refId": "A"
@@ -495,7 +495,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "rate(replication_ignored_total[5m])",
+          "expr": "rate(replication_ignored_total{app=~\"cache-master|cache-replica\"}[5m])",
           "hide": false,
           "legendFormat": "Ignored",
           "range": true,
@@ -585,7 +585,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "rate(replication_connections_established[5m])",
+          "expr": "rate(replication_connections_established_total{app=~\"cache-master|cache-replica\"}[5m])",
           "legendFormat": "Established",
           "range": true,
           "refId": "A"
@@ -596,7 +596,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "rate(replication_connections_failed[5m])",
+          "expr": "rate(replication_connections_failed_total{app=~\"cache-master|cache-replica\"}[5m])",
           "hide": false,
           "legendFormat": "Failed",
           "range": true,

@@ -64,7 +64,7 @@
       "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0},
       "targets": [
         {
-          "expr": "sum(cache_evictions{app=~\"cache-master|cache-replica\"})",
+          "expr": "sum(cache_evictions_total{app=~\"cache-master|cache-replica\"})",
           "legendFormat": "Evictions",
           "refId": "A"
         }
@@ -92,12 +92,12 @@
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
       "targets": [
         {
-          "expr": "sum by (instance, vps) (rate(cache_hits{app=~\"cache-master|cache-replica\"}[1m]))",
+          "expr": "sum by (instance, vps) (rate(cache_hits_total{app=~\"cache-master|cache-replica\"}[1m]))",
           "legendFormat": "{{vps}} - {{instance}} - Hits",
           "refId": "A"
         },
         {
-          "expr": "sum by (instance, vps) (rate(cache_misses{app=~\"cache-master|cache-replica\"}[1m]))",
+          "expr": "sum by (instance, vps) (rate(cache_misses_total{app=~\"cache-master|cache-replica\"}[1m]))",
           "legendFormat": "{{vps}} - {{instance}} - Misses",
           "refId": "B"
         }
@@ -120,7 +120,7 @@
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
       "targets": [
         {
-          "expr": "sum by (instance, vps) (rate(cache_evictions{app=~\"cache-master|cache-replica\"}[1m]))",
+          "expr": "sum by (instance, vps) (rate(cache_evictions_total{app=~\"cache-master|cache-replica\"}[1m]))",
           "legendFormat": "{{vps}} - {{instance}}",
           "refId": "A"
         }
