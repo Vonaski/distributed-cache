@@ -136,8 +136,8 @@ jobs:
           PROXY_1_PORT=8080
           PROXY_2_PORT=8081
 
-          # Cache nodes configuration
-          CACHE_NODES=master-1:cache-master-1:7000:7100,master-2:cache-master-2:7001:7101,master-3:${{ secrets.VPS2_HOST }}:7002:7102
+          # Cache nodes configuration (masters + replicas for failover and read distribution)
+          CACHE_NODES=master-1:cache-master-1:7000:7100,master-2:cache-master-2:7001:7101,master-3:${{ secrets.VPS2_HOST }}:7002:7102,replica-1:${{ secrets.VPS2_HOST }}:7003:7103,replica-2:${{ secrets.VPS2_HOST }}:7004:7104,replica-3:cache-replica-3:7005:7105
 
           # Master nodes
           MASTER_1_NODE_ID=master-1
@@ -290,8 +290,8 @@ jobs:
           # Proxy
           PROXY_3_PORT=8080
 
-          # Cache nodes configuration
-          CACHE_NODES=master-1:${{ secrets.VPS1_HOST }}:7000:7100,master-2:${{ secrets.VPS1_HOST }}:7001:7101,master-3:cache-master-3:7002:7102
+          # Cache nodes configuration (masters + replicas for failover and read distribution)
+          CACHE_NODES=master-1:${{ secrets.VPS1_HOST }}:7000:7100,master-2:${{ secrets.VPS1_HOST }}:7001:7101,master-3:cache-master-3:7002:7102,replica-1:cache-replica-1:7003:7103,replica-2:cache-replica-2:7004:7104,replica-3:${{ secrets.VPS1_HOST }}:7005:7105
 
           # Master 3
           MASTER_3_NODE_ID=master-3
