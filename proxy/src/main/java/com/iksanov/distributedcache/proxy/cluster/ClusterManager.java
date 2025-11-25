@@ -125,6 +125,14 @@ public class ClusterManager {
     }
 
     private String extractMasterNodeId(String replicaNodeId) {
+        // Handle naming convention: replica-N -> master-N
+        if (replicaNodeId.matches("replica-\\d+")) {
+            String masterNodeId = replicaNodeId.replace("replica-", "master-");
+            log.debug("Extracted master nodeId '{}' from replica '{}' (simple convention)", masterNodeId, replicaNodeId);
+            return masterNodeId;
+        }
+
+        // Handle complex naming: replica-X-master-Y or master-Y-replica-X -> master-Y
         String masterNodeId = replicaNodeId
                 .replaceAll("replica[-_]?\\d*[-_]?", "")
                 .replaceAll("[-_]?replica\\d*", "")
