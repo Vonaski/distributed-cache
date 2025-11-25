@@ -62,6 +62,15 @@ public class NetMetrics {
 
         this.requestDuration = Timer.builder("net.request.duration")
                 .description("Request processing duration in milliseconds")
+                .publishPercentileHistogram()
+                .serviceLevelObjectives(
+                    java.time.Duration.ofMillis(1),
+                    java.time.Duration.ofMillis(5),
+                    java.time.Duration.ofMillis(10),
+                    java.time.Duration.ofMillis(50),
+                    java.time.Duration.ofMillis(100),
+                    java.time.Duration.ofMillis(500)
+                )
                 .register(registry);
 
         Gauge.builder("net.connections.active", activeConnections, AtomicLong::get)

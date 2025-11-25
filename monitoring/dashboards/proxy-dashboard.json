@@ -36,7 +36,7 @@
       "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0},
       "targets": [
         {
-          "expr": "sum(rate(cache_requests_success{app=\"proxy\"}[5m])) / sum(rate(cache_requests_total{app=\"proxy\"}[5m])) * 100",
+          "expr": "sum(rate(cache_requests_success_total{app=\"proxy\"}[5m])) / sum(rate(cache_requests_total{app=\"proxy\"}[5m])) * 100",
           "legendFormat": "Success Rate",
           "refId": "A"
         }
@@ -64,7 +64,7 @@
       "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0},
       "targets": [
         {
-          "expr": "sum(rate(cache_requests_failed{app=\"proxy\"}[1m]))",
+          "expr": "sum(rate(cache_requests_failed_total{app=\"proxy\"}[1m]))",
           "legendFormat": "Errors/sec",
           "refId": "A"
         }
@@ -92,7 +92,7 @@
       "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0},
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(cache_request_duration_bucket{app=\"proxy\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(cache_request_duration_seconds_bucket{app=\"proxy\"}[5m])) by (le))",
           "legendFormat": "p95 latency",
           "refId": "A"
         }
@@ -134,12 +134,12 @@
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
       "targets": [
         {
-          "expr": "sum(rate(cache_requests_success{app=\"proxy\"}[1m]))",
+          "expr": "sum(rate(cache_requests_success_total{app=\"proxy\"}[1m]))",
           "legendFormat": "Success",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(cache_requests_failed{app=\"proxy\"}[1m]))",
+          "expr": "sum(rate(cache_requests_failed_total{app=\"proxy\"}[1m]))",
           "legendFormat": "Failed",
           "refId": "B"
         }
@@ -212,7 +212,7 @@
       "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24},
       "targets": [
         {
-          "expr": "sum(rate(cache_request_duration_bucket{app=\"proxy\"}[1m])) by (le)",
+          "expr": "sum(rate(cache_request_duration_seconds_bucket{app=\"proxy\"}[1m])) by (le)",
           "legendFormat": "{{le}}",
           "format": "heatmap",
           "refId": "A"
