@@ -40,6 +40,7 @@ A high-performance distributed caching system with consistent hashing, master-re
   - Prometheus: Metrics collection (15s scrape interval)
   - Grafana: Visualization and dashboards (pre-configured)
   - Loki: Log aggregation (7-day retention)
+  - Promtail: Log shipper from Docker containers to Loki
 
 ## Features
 
@@ -55,14 +56,14 @@ A high-performance distributed caching system with consistent hashing, master-re
 - Docker 20.10+
 - Docker Compose 2.0+
 - At least 8GB RAM available
-- Ports: 80, 8080-8086, 7000-7005, 7100-7105, 3000, 9090, 3100
+- Ports: 80, 8080-8086, 7000-7005, 7100-7105, 3000, 9090, 9080, 3100
 
 ### Production (2 VPS Servers)
 - 2 VPS servers with 4 vCPU and 8GB RAM each
 - Ubuntu 20.04+ or similar
 - Docker 20.10+ and Docker Compose 2.0+
 - Network connectivity between servers
-- See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed setup
+- GitHub Actions configured for CI/CD deployment
 
 ## Quick Start (Local Development)
 
@@ -80,14 +81,14 @@ nano .env
 ### 2. Build and Start All Services
 
 ```bash
-# Build and start all 13 services
-docker-compose up --build -d
+# Build and start all services (using dev compose file)
+docker-compose -f docker-compose.dev.yml up --build -d
 
 # View logs
-docker-compose logs -f
+docker-compose -f docker-compose.dev.yml logs -f
 
-# Check status (should show 13 containers running)
-docker-compose ps
+# Check status (should show 15 containers running)
+docker-compose -f docker-compose.dev.yml ps
 
 # View specific service logs
 docker-compose logs -f cache-master-1
@@ -269,45 +270,52 @@ View logs with Loki integration in Grafana:
 
 This project is optimized for deployment on 2 VPS servers with 4 vCPU and 8GB RAM each.
 
-**Server 1 hosts:**
+**VPS1 (45.14.194.8) hosts:**
 - Nginx load balancer
 - Proxy-1, Proxy-2
-- Cache-Master-1, Cache-Master-2
-- Cache-Replica-3
+- Cache-Master-1
+- Cache-Replica-2 (replicates Master-2 from VPS2)
+- Cache-Replica-3 (replicates Master-3 from VPS2)
+- Promtail (sends logs to Loki on VPS2)
 - Prometheus
 
-**Server 2 hosts:**
+**VPS2 (91.230.110.139) hosts:**
 - Proxy-3
-- Cache-Master-3
-- Cache-Replica-1, Cache-Replica-2
+- Cache-Master-2, Cache-Master-3
+- Cache-Replica-1 (replicates Master-1 from VPS1)
+- Promtail (sends logs to local Loki)
 - Grafana, Loki
 
 ### Deployment Steps
 
-For detailed step-by-step deployment instructions, see [DEPLOYMENT.md](DEPLOYMENT.md).
+Deployment is automated via GitHub Actions CI/CD pipeline.
 
-**Quick summary:**
+**Workflow:**
 
-1. **Build and push images** to Docker registry:
+1. **CI Pipeline** (.github/workflows/ci.yml):
+   - Runs on push to develop branch
+   - Builds Maven project and runs tests
+   - Builds Docker images
+   - Pushes images to GitHub Container Registry (ghcr.io)
+
+2. **CD Pipeline** (.github/workflows/deploy.yml):
+   - Triggers on merge to main branch or manual dispatch
+   - Deploys to VPS1 and VPS2 in parallel
+   - Generates environment-specific configs (.env, nginx.conf)
+   - Pulls latest images and recreates containers
+   - Runs health checks
+
+**Manual deployment:**
 ```bash
-export REGISTRY=docker.io/your-username
-export TAG=v1.0.0
+# On VPS1
+cd ~/distributed-cache
+docker-compose pull
+docker-compose up -d --force-recreate
 
-docker-compose build
-docker tag distributed-cache-proxy:latest ${REGISTRY}/cache-proxy:${TAG}
-docker tag distributed-cache-cache-node:latest ${REGISTRY}/cache-node:${TAG}
-docker push ${REGISTRY}/cache-proxy:${TAG}
-docker push ${REGISTRY}/cache-node:${TAG}
-```
-
-2. **Deploy on Server 1** (see DEPLOYMENT.md for service filtering):
-```bash
-docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-```
-
-3. **Deploy on Server 2** (see DEPLOYMENT.md for service filtering):
-```bash
-docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# On VPS2
+cd ~/distributed-cache
+docker-compose pull
+docker-compose up -d --force-recreate
 ```
 
 ### Production Features
@@ -325,7 +333,7 @@ docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 - **Firewall**: Configure firewall rules between servers
 - **Backup**: Regularly backup Docker volumes (`/data` directories)
 - **Monitoring**: Set up Grafana alerts for critical metrics
-- **Updates**: Follow zero-downtime update procedures in DEPLOYMENT.md
+- **Updates**: Deploy via GitHub Actions for zero-downtime updates
 
 ## Troubleshooting
 
@@ -502,18 +510,18 @@ distributed-cache/
 │   └── dashboards/          # Pre-built Grafana dashboards
 ├── nginx/                   # Nginx load balancer config
 │   └── nginx.conf           # Upstream and routing rules
-├── docker-compose.yml       # Base compose file (all services)
-├── docker-compose.prod.yml  # Production overrides (resource limits, JVM tuning)
-├── .env.example             # Environment variables template
-├── README.md                # This file
-└── DEPLOYMENT.md            # Detailed deployment guide
+├── docker-compose.dev.yml       # Local development (all services)
+├── docker-compose.vps1.prod.yml # Production config for VPS1
+├── docker-compose.vps2.prod.yml # Production config for VPS2
+├── .env.example                 # Environment variables template
+├── .github/workflows/           # CI/CD pipelines
+│   ├── ci.yml                   # Build and test
+│   └── deploy.yml               # Deploy to production
+└── README.md                    # This file
 
-Total services: 13 containers
-├── 1 Nginx load balancer
-├── 3 Proxy instances
-├── 3 Cache masters
-├── 3 Cache replicas
-└── 3 Monitoring services (Prometheus, Grafana, Loki)
+Total services (production):
+VPS1: 8 containers (Nginx, 2 Proxies, 1 Master, 2 Replicas, Promtail, Prometheus)
+VPS2: 7 containers (1 Proxy, 2 Masters, 1 Replica, Promtail, Grafana, Loki)
 ```
 
 ## Technologies
@@ -544,5 +552,5 @@ Contributions welcome! Please:
 
 For issues and questions:
 - GitHub Issues: https://github.com/Vonaski/distributed-cache/issues
-- Documentation: See README.md and DEPLOYMENT.md
+- Documentation: See README.md
 - Monitoring: Check Grafana dashboards for system health
