@@ -1,0 +1,287 @@
+version: '3.8'
+
+# Production docker-compose for VPS2
+# Components: Proxy-3, Master-2, Master-3, Replica-1, Promtail, Grafana, Loki
+# VPS2: 4 vCPU, 8GB RAM
+# Masters: 2 (Master-2, Master-3)
+# Replicas: 1 (Replica-1 from Master-1)
+# IP will be substituted during deployment
+
+services:
+  # ============================================
+  # Proxy-3 - VPS2
+  # ============================================
+  proxy-3:
+    image: ${REGISTRY}/proxy:${TAG:-latest}
+    container_name: proxy-3
+    environment:
+      - SERVER_PORT=8080
+      - CACHE_NODES=${CACHE_NODES}
+      - CACHE_VIRTUAL_NODES=150
+      - CACHE_TIMEOUT_MS=3000
+      - CACHE_MAX_RETRIES=2
+      - CACHE_POOL_SIZE=10
+      - JAVA_OPTS=-Xmx512m -Xms512m -XX:+UseZGC -XX:+ZGenerational -XX:MaxDirectMemorySize=128m -XX:+UnlockExperimentalVMOptions -XX:+UseStringDeduplication -Dio.netty.allocator.type=pooled -Dio.netty.maxDirectMemory=0 -Dio.netty.leakDetection.level=simple
+    ports:
+      - "8080:8080"
+    networks:
+      - cache-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 768M
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================
+  # Cache Master-2 - VPS2
+  # ============================================
+  cache-master-2:
+    image: ${REGISTRY}/cache-node:${TAG:-latest}
+    container_name: cache-master-2
+    environment:
+      - CACHE_NODE_ID=${MASTER_2_NODE_ID:-master-2}
+      - CACHE_NODE_HOST=0.0.0.0
+      - CACHE_NODE_PORT=7001
+      - CACHE_NODE_REPLICATION_PORT=7101
+      - METRICS_PORT=9082
+      - CACHE_CLUSTER_ENABLED=true
+      - CACHE_CLUSTER_NODES=${MASTER_2_REPLICAS}
+      - CACHE_NODE_ROLE=MASTER
+      - CACHE_NODE_PRIORITY=0
+      - JAVA_OPTS=-Xmx2g -Xms2g -XX:+UseZGC -XX:+ZGenerational -XX:MaxDirectMemorySize=512m -XX:+UnlockExperimentalVMOptions -XX:+UseStringDeduplication -Dio.netty.allocator.type=pooled -Dio.netty.maxDirectMemory=0 -Dio.netty.leakDetection.level=simple -XX:+AlwaysPreTouch
+    ports:
+      - "7001:7001"
+      - "7101:7101"
+      - "9082:9082"
+    volumes:
+      - cache-master-2-data:/data
+    networks:
+      - cache-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2560M
+        reservations:
+          cpus: '1'
+          memory: 2G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================
+  # Cache Master-3 - VPS2
+  # ============================================
+  cache-master-3:
+    image: ${REGISTRY}/cache-node:${TAG:-latest}
+    container_name: cache-master-3
+    environment:
+      - CACHE_NODE_ID=${MASTER_3_NODE_ID:-master-3}
+      - CACHE_NODE_HOST=0.0.0.0
+      - CACHE_NODE_PORT=7002
+      - CACHE_NODE_REPLICATION_PORT=7102
+      - METRICS_PORT=9083
+      - CACHE_CLUSTER_ENABLED=true
+      - CACHE_CLUSTER_NODES=${MASTER_3_REPLICAS}
+      - CACHE_NODE_ROLE=MASTER
+      - CACHE_NODE_PRIORITY=0
+      - JAVA_OPTS=-Xmx2g -Xms2g -XX:+UseZGC -XX:+ZGenerational -XX:MaxDirectMemorySize=512m -XX:+UnlockExperimentalVMOptions -XX:+UseStringDeduplication -Dio.netty.allocator.type=pooled -Dio.netty.maxDirectMemory=0 -Dio.netty.leakDetection.level=simple -XX:+AlwaysPreTouch
+    ports:
+      - "7002:7002"
+      - "7102:7102"
+      - "9083:9083"
+    volumes:
+      - cache-master-3-data:/data
+    networks:
+      - cache-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2560M
+        reservations:
+          cpus: '1'
+          memory: 2G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================
+  # Cache Replica-1 - VPS2
+  # Replicates Master-1 from VPS1
+  # ============================================
+  cache-replica-1:
+    image: ${REGISTRY}/cache-node:${TAG:-latest}
+    container_name: cache-replica-1
+    environment:
+      - CACHE_NODE_ID=${REPLICA_1_NODE_ID:-replica-1}
+      - CACHE_NODE_HOST=0.0.0.0
+      - CACHE_NODE_PORT=7003
+      - CACHE_NODE_REPLICATION_PORT=7103
+      - METRICS_PORT=9084
+      - CACHE_CLUSTER_ENABLED=true
+      - CACHE_CLUSTER_NODES=master-1:${REPLICA_1_MASTER_HOST}:7000:${REPLICA_1_MASTER_PORT}
+      - CACHE_NODE_ROLE=REPLICA
+      - CACHE_NODE_PRIORITY=1
+      - JAVA_OPTS=-Xmx1536m -Xms1536m -XX:+UseZGC -XX:+ZGenerational -XX:MaxDirectMemorySize=384m -XX:+UnlockExperimentalVMOptions -XX:+UseStringDeduplication -Dio.netty.allocator.type=pooled -Dio.netty.maxDirectMemory=0 -Dio.netty.leakDetection.level=simple -XX:+AlwaysPreTouch
+    ports:
+      - "7003:7003"
+      - "7103:7103"
+      - "9084:9084"
+    volumes:
+      - cache-replica-1-data:/data
+    networks:
+      - cache-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 2048M
+        reservations:
+          cpus: '0.75'
+          memory: 1536M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================
+  # Promtail - VPS2 only
+  # Collects logs from Docker and sends to Loki locally
+  # ============================================
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./monitoring/promtail-vps2.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - promtail-data:/tmp
+    depends_on:
+      - loki
+    networks:
+      - cache-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================
+  # Grafana - VPS2 only
+  # ============================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./monitoring/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./monitoring/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./monitoring/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - loki
+    networks:
+      - cache-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================
+  # Loki - VPS2 only
+  # ============================================
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./monitoring/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - cache-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 768M
+        reservations:
+          cpus: '0.25'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# ============================================
+# Networks
+# ============================================
+networks:
+  cache-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# ============================================
+# Volumes for data persistence
+# ============================================
+volumes:
+  cache-master-2-data:
+  cache-master-3-data:
+  cache-replica-1-data:
+  promtail-data:
+  grafana-data:
+  loki-data:
