@@ -7,14 +7,9 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-
 import java.util.*;
 import java.util.stream.Collectors;
 
-/**
- * Controller for cluster monitoring and diagnostics.
- * Provides endpoints to inspect the current state of the distributed cache cluster.
- */
 @RestController
 @RequestMapping("/api/cluster")
 public class ClusterController {
@@ -25,36 +20,28 @@ public class ClusterController {
         this.clusterManager = clusterManager;
     }
 
-    /**
-     * Get all master nodes in the consistent hash ring.
-     *
-     * @return List of master nodes with their connection details
-     */
     @GetMapping("/masters")
     public ResponseEntity<Map<String, Object>> getMasterNodes() {
         Set<NodeInfo> masters = clusterManager.getAllNodes();
 
         List<Map<String, Object>> mastersList = masters.stream()
-                .map(node -> Map.of(
-                        "nodeId", node.nodeId(),
-                        "host", node.host(),
-                        "port", node.port(),
-                        "replicationPort", node.replicationPort()
-                ))
+                .map(node -> {
+                    Map<String, Object> nodeMap = new HashMap<>();
+                    nodeMap.put("nodeId", node.nodeId());
+                    nodeMap.put("host", node.host());
+                    nodeMap.put("port", node.port());
+                    nodeMap.put("replicationPort", node.replicationPort());
+                    return nodeMap;
+                })
                 .collect(Collectors.toList());
 
-        return ResponseEntity.ok(Map.of(
-                "masters", mastersList,
-                "totalMasters", masters.size(),
-                "virtualNodesPerMaster", clusterManager.getVirtualNodeCount()
-        ));
+        Map<String, Object> response = new HashMap<>();
+        response.put("masters", mastersList);
+        response.put("totalMasters", masters.size());
+        response.put("virtualNodesPerMaster", clusterManager.getVirtualNodeCount());
+        return ResponseEntity.ok(response);
     }
 
-    /**
-     * Get complete cluster topology (masters + replicas).
-     *
-     * @return Full cluster topology with master-replica mappings
-     */
     @GetMapping("/topology")
     public ResponseEntity<Map<String, Object>> getClusterTopology() {
         Set<NodeInfo> masters = clusterManager.getAllNodes();
@@ -64,13 +51,14 @@ public class ClusterController {
                     Set<NodeInfo> replicas = clusterManager.getReplicas(master);
 
                     List<Map<String, Object>> replicasList = replicas.stream()
-                            .map(replica -> Map.of(
-                                    "nodeId", replica.nodeId(),
-                                    "host", replica.host(),
-                                    "port", replica.port(),
-                                    "replicationPort", replica.replicationPort()
-                            ))
-                            .collect(Collectors.toList());
+                            .map(replica -> {
+                                Map<String, Object> replicaMap = new HashMap<>();
+                                replicaMap.put("nodeId", replica.nodeId());
+                                replicaMap.put("host", replica.host());
+                                replicaMap.put("port", replica.port());
+                                replicaMap.put("replicationPort", replica.replicationPort());
+                                return replicaMap;
+                            }).toList();
 
                     return Map.of(
                             "master", Map.of(
@@ -99,11 +87,6 @@ public class ClusterController {
         ));
     }
 
-    /**
-     * Get cluster health summary.
-     *
-     * @return Basic cluster health information
-     */
     @GetMapping("/health")
     public ResponseEntity<Map<String, Object>> getClusterHealth() {
         Set<NodeInfo> masters = clusterManager.getAllNodes();
@@ -126,12 +109,6 @@ public class ClusterController {
         ));
     }
 
-    /**
-     * Get detailed information about which node handles a specific key.
-     *
-     * @param key The cache key to lookup
-     * @return Information about which master handles the key
-     */
     @GetMapping("/node-for-key")
     public ResponseEntity<Map<String, Object>> getNodeForKey(@RequestParam String key) {
         if (key == null || key.isBlank()) {
@@ -145,12 +122,13 @@ public class ClusterController {
         Set<NodeInfo> replicas = clusterManager.getReplicas(masterForWrite);
 
         List<Map<String, Object>> replicasList = replicas.stream()
-                .map(replica -> Map.of(
-                        "nodeId", replica.nodeId(),
-                        "host", replica.host(),
-                        "port", replica.port()
-                ))
-                .collect(Collectors.toList());
+                .map(replica -> {
+                    Map<String, Object> replicaMap = new HashMap<>();
+                    replicaMap.put("nodeId", replica.nodeId());
+                    replicaMap.put("host", replica.host());
+                    replicaMap.put("port", replica.port());
+                    return replicaMap;
+                }).toList();
 
         return ResponseEntity.ok(Map.of(
                 "key", key,
