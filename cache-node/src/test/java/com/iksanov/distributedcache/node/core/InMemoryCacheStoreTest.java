@@ -18,7 +18,7 @@ class InMemoryCacheStoreTest {
 
     @BeforeEach
     void setUp() {
-        cache = new InMemoryCacheStore(5, 1000, 500, metrics);
+        cache = new InMemoryCacheStore(5, 1000, metrics);
     }
 
     @AfterEach
@@ -99,7 +99,7 @@ class InMemoryCacheStoreTest {
     @Test
     @DisplayName("Entries should not expire when TTL=0 (no expiration)")
     void shouldNotExpireIfTTLIsZero() throws InterruptedException {
-        InMemoryCacheStore noTtlCache = new InMemoryCacheStore(3, 0, 500, metrics);
+        InMemoryCacheStore noTtlCache = new InMemoryCacheStore(3, 0, metrics);
 
         noTtlCache.put("key", "value");
         Thread.sleep(2000);

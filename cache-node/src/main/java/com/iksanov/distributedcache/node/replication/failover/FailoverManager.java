@@ -6,6 +6,7 @@ import com.iksanov.distributedcache.node.replication.ReplicationSender;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -45,18 +46,7 @@ public class FailoverManager {
         void onRoleChanged(NodeRole oldRole, NodeRole newRole, long newEpoch);
     }
 
-    /**
-     * Constructor for FailoverManager.
-     *
-     * @param nodeId Node identifier
-     * @param priority Failover priority (0=original master, 1=first replica, etc.)
-     * @param initialRole Initial role (MASTER or REPLICA)
-     * @param replicationSender Sender for heartbeat messages
-     * @param selfNode Current node info (for master to send heartbeat)
-     * @param masterNode Master node to monitor (for replicas only, can be null for master)
-     */
-    public FailoverManager(String nodeId, int priority, NodeRole initialRole,
-                          ReplicationSender replicationSender, NodeInfo selfNode, NodeInfo masterNode) {
+    public FailoverManager(String nodeId, int priority, NodeRole initialRole, ReplicationSender replicationSender, NodeInfo selfNode, NodeInfo masterNode) {
         this.nodeId = Objects.requireNonNull(nodeId, "nodeId cannot be null");
         this.priority = priority;
         this.currentRole = new AtomicReference<>(Objects.requireNonNull(initialRole, "initialRole cannot be null"));
@@ -64,12 +54,8 @@ public class FailoverManager {
         this.selfNode = selfNode;
         this.masterNode = masterNode;
 
-        if (initialRole == NodeRole.REPLICA && masterNode == null) {
-            log.warn("REPLICA node created without masterNode - failover monitoring will not work");
-        }
-        if (initialRole == NodeRole.MASTER && selfNode == null) {
-            log.warn("MASTER node created without selfNode - heartbeat sending will not work");
-        }
+        if (initialRole == NodeRole.REPLICA && masterNode == null) log.warn("REPLICA node created without masterNode - failover monitoring will not work");
+        if (initialRole == NodeRole.MASTER && selfNode == null) log.warn("MASTER node created without selfNode - heartbeat sending will not work");
     }
 
     public synchronized void start() {
@@ -96,17 +82,13 @@ public class FailoverManager {
     }
 
     public synchronized void stop() {
-        if (!running) {
-            return;
-        }
+        if (!running) return;
 
         running = false;
         if (scheduler != null) {
             scheduler.shutdown();
             try {
-                if (!scheduler.awaitTermination(2, TimeUnit.SECONDS)) {
-                    scheduler.shutdownNow();
-                }
+                if (!scheduler.awaitTermination(2, TimeUnit.SECONDS)) scheduler.shutdownNow();
             } catch (InterruptedException e) {
                 scheduler.shutdownNow();
                 Thread.currentThread().interrupt();
@@ -142,7 +124,7 @@ public class FailoverManager {
             } catch (Exception e) {
                 log.error("Failed to monitor heartbeat: {}", e.getMessage(), e);
             }
-        }, HEARTBEAT_TIMEOUT_MS, 1000, TimeUnit.MILLISECONDS);
+        }, HEARTBEAT_TIMEOUT_MS, HEARTBEAT_INTERVAL_MS, TimeUnit.MILLISECONDS);
     }
 
     private void promoteToMaster() {
@@ -154,7 +136,7 @@ public class FailoverManager {
         promoteToMasterWithEpoch(newEpoch, java.util.Collections.emptyList());
     }
 
-    public synchronized void promoteToMasterWithEpoch(long newEpoch, java.util.List<NodeInfo> replicas) {
+    public synchronized void promoteToMasterWithEpoch(long newEpoch, List<NodeInfo> replicas) {
         NodeRole oldRole = currentRole.get();
         if (oldRole == NodeRole.MASTER) {
             log.debug("Already MASTER, skipping promotion");

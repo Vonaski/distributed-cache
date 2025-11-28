@@ -5,7 +5,6 @@ import com.iksanov.distributedcache.common.cluster.ReplicaManager;
 import com.iksanov.distributedcache.node.core.CacheStore;
 import com.iksanov.distributedcache.node.core.InMemoryCacheStore;
 import com.iksanov.distributedcache.node.replication.*;
-import io.netty.channel.nio.NioEventLoopGroup;
 import org.junit.jupiter.api.*;
 import java.time.Duration;
 import java.time.Instant;
@@ -19,7 +18,6 @@ import static org.junit.jupiter.api.Assertions.*;
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class ReplicationIntegrationTest {
 
-    private NioEventLoopGroup sharedEventLoopGroup;
     private ReplicationManager masterReplicationManager;
     private ReplicationManager replicaReplicationManager;
     private CacheStore masterStore;
@@ -34,25 +32,29 @@ public class ReplicationIntegrationTest {
 
     @BeforeAll
     void setup() throws Exception {
-        sharedEventLoopGroup = new NioEventLoopGroup(2);
-
         masterNode = new NodeInfo("master-1", "127.0.0.1", 9500);
         replicaNode = new NodeInfo("replica-1", "127.0.0.1", 9501);
 
-        masterStore = new InMemoryCacheStore(1000, 0, 500);
-        replicaStore = new InMemoryCacheStore(1000, 0, 500);
+        masterStore = new InMemoryCacheStore(1000, 0);
+        replicaStore = new InMemoryCacheStore(1000, 0);
 
         masterReceiver = new ReplicationReceiver(
                 masterNode.host(),
                 masterNode.replicationPort(),
-                masterStore
+                masterStore,
+                1024 * 1024,
+                masterNode.nodeId(),
+                null
         );
         masterReceiver.start();
 
         replicaReceiver = new ReplicationReceiver(
                 replicaNode.host(),
                 replicaNode.replicationPort(),
-                replicaStore
+                replicaStore,
+                1024 * 1024,
+                replicaNode.nodeId(),
+                null
         );
         replicaReceiver.start();
 
@@ -60,8 +62,8 @@ public class ReplicationIntegrationTest {
 
         replicaManager = new ReplicaManager();
         replicaManager.registerReplica(masterNode, replicaNode);
-        masterSender = new ReplicationSender(replicaManager, sharedEventLoopGroup);
-        replicaSender = new ReplicationSender(replicaManager, sharedEventLoopGroup);
+        masterSender = new ReplicationSender(replicaManager, null);
+        replicaSender = new ReplicationSender(replicaManager, null);
 
 
         masterReplicationManager = new ReplicationManager(
@@ -86,7 +88,6 @@ public class ReplicationIntegrationTest {
         if (replicaReplicationManager != null) replicaReplicationManager.shutdown();
         if (masterReceiver != null) masterReceiver.stop();
         if (replicaReceiver != null) replicaReceiver.stop();
-        if (sharedEventLoopGroup != null) sharedEventLoopGroup.shutdownGracefully();
     }
 
     @Test

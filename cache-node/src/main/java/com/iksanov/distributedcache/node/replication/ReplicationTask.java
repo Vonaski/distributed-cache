@@ -27,10 +27,6 @@ public record ReplicationTask(
         if (sequence < 0) throw new IllegalArgumentException("sequence must be >= 0");
     }
 
-    public ReplicationTask(String key, String value, Operation operation, long timestamp, String origin) {
-        this(key, value, operation, timestamp, origin, 0L);
-    }
-
     public static ReplicationTask ofSet(String key, String value, String origin, long sequence) {
         return new ReplicationTask(key, value, Operation.SET, System.currentTimeMillis(), origin, sequence);
     }
@@ -39,34 +35,12 @@ public record ReplicationTask(
         return new ReplicationTask(key, null, Operation.DELETE, System.currentTimeMillis(), origin, sequence);
     }
 
-    public static ReplicationTask ofSet(String key, String value, String origin) {
-        return new ReplicationTask(key, value, Operation.SET,
-                System.currentTimeMillis(), origin, 0L);
-    }
-
-    public static ReplicationTask ofDelete(String key, String origin) {
-        return new ReplicationTask(key, null, Operation.DELETE,
-                System.currentTimeMillis(), origin, 0L);
-    }
-
     public static ReplicationTask ofHeartbeat(String senderNodeId) {
-        return new ReplicationTask(senderNodeId, null, Operation.HEARTBEAT,
-                System.currentTimeMillis(), senderNodeId, 0L);
+        return new ReplicationTask(senderNodeId, null, Operation.HEARTBEAT, System.currentTimeMillis(), senderNodeId, 0L);
     }
 
     public static ReplicationTask ofHeartbeatAck(String masterNodeId, long epoch) {
-        return new ReplicationTask(masterNodeId, null, Operation.HEARTBEAT_ACK,
-                System.currentTimeMillis(), masterNodeId, epoch);
-    }
-
-    public static ReplicationTask ofPromoteToMaster(String newMasterNodeId, long newEpoch) {
-        return new ReplicationTask(newMasterNodeId, null, Operation.PROMOTE_TO_MASTER,
-                System.currentTimeMillis(), newMasterNodeId, newEpoch);
-    }
-
-    public static ReplicationTask ofEpochSync(String senderNodeId, long currentEpoch) {
-        return new ReplicationTask(senderNodeId, null, Operation.EPOCH_SYNC,
-                System.currentTimeMillis(), senderNodeId, currentEpoch);
+        return new ReplicationTask(masterNodeId, null, Operation.HEARTBEAT_ACK, System.currentTimeMillis(), masterNodeId, epoch);
     }
 
     public enum Operation {

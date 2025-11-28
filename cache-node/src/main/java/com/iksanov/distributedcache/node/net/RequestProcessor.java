@@ -1,9 +1,9 @@
 package com.iksanov.distributedcache.node.net;
 
+import com.iksanov.distributedcache.common.cluster.NodeInfo;
 import com.iksanov.distributedcache.common.dto.CacheRequest;
 import com.iksanov.distributedcache.common.dto.CacheResponse;
 import com.iksanov.distributedcache.common.exception.CacheException;
-import com.iksanov.distributedcache.node.config.ApplicationConfig;
 import com.iksanov.distributedcache.node.config.ApplicationConfig.NodeRole;
 import com.iksanov.distributedcache.node.core.CacheStore;
 import com.iksanov.distributedcache.node.metrics.NetMetrics;
@@ -13,6 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -34,7 +35,6 @@ public class RequestProcessor {
     private final ReplicationManager replicationManager;
     private final FailoverManager failoverManager;
     private volatile NodeRole nodeRole;
-    private static final long SLOW_REQUEST_THRESHOLD_MS = 100;
     private final NetMetrics metrics;
 
     public RequestProcessor(CacheStore store, ReplicationManager replicationManager, NodeRole nodeRole, NetMetrics metrics, FailoverManager failoverManager) {
@@ -69,11 +69,7 @@ public class RequestProcessor {
             long durationMs = Duration.between(start, Instant.now()).toMillis();
             metrics.recordRequestDuration(durationMs);
             metrics.incrementResponses();
-            if (durationMs > SLOW_REQUEST_THRESHOLD_MS) {
-                log.warn("Slow request [command={}, requestId={}] took {} ms", request.command(), request.requestId(), durationMs);
-            } else {
-                log.debug("Request [command={}, requestId={}] processed in {} ms", request.command(), request.requestId(), durationMs);
-            }
+            log.debug("Request [command={}, requestId={}] processed in {} ms", request.command(), request.requestId(), durationMs);
         }
     }
 
@@ -149,7 +145,6 @@ public class RequestProcessor {
 
     private CacheResponse handleStatus(CacheRequest request) {
         if (failoverManager == null) {
-            // Standalone mode - no failover manager
             String metadata = String.format("role:%s,epoch:0", nodeRole);
             log.trace("STATUS request: {}", metadata);
             return CacheResponse.okWithMetadata(request.requestId(), metadata);
@@ -169,7 +164,7 @@ public class RequestProcessor {
         }
 
         long requestedEpoch;
-        java.util.List<com.iksanov.distributedcache.common.cluster.NodeInfo> replicaList = new java.util.ArrayList<>();
+        List<NodeInfo> replicaList = new java.util.ArrayList<>();
 
         try {
             String value = request.value();
@@ -191,8 +186,7 @@ public class RequestProcessor {
                     String[] replicaStrings = replicasPart.split(";");
                     for (String replicaStr : replicaStrings) {
                         try {
-                            com.iksanov.distributedcache.common.cluster.NodeInfo replica =
-                                com.iksanov.distributedcache.common.cluster.NodeInfo.fromString(replicaStr);
+                            NodeInfo replica = NodeInfo.fromString(replicaStr);
                             replicaList.add(replica);
                         } catch (Exception e) {
                             log.warn("Failed to parse replica '{}': {}", replicaStr, e.getMessage());

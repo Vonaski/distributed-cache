@@ -57,7 +57,7 @@ public final class NetServer {
         }
 
         bossGroup = new NioEventLoopGroup(Math.max(1, config.bossThreads()));
-        workerGroup = config.workerThreads() > 0 ? new NioEventLoopGroup(config.workerThreads()) : new NioEventLoopGroup();
+        workerGroup = config.workerThreads() > 0 ? new NioEventLoopGroup(config.workerThreads()) : new NioEventLoopGroup(2);
 
         try {
             ServerBootstrap bootstrap = new ServerBootstrap();

@@ -13,6 +13,7 @@ import io.netty.handler.codec.LengthFieldPrepender;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -37,24 +38,14 @@ public class ReplicationSender {
     private final ReplicaManager replicaManager;
     private final ReplicationMetrics metrics;
     private final EventLoopGroup eventLoopGroup;
-    private final boolean ownsEventLoopGroup;
     private final Bootstrap bootstrap;
     private final ConcurrentMap<String, Channel> channels = new ConcurrentHashMap<>();
     private volatile boolean shuttingDown = false;
 
-    public ReplicationSender(ReplicaManager replicaManager) {
-        this(replicaManager, null, null);
-    }
-
-    public ReplicationSender(ReplicaManager replicaManager, EventLoopGroup injectedGroup) {
-        this(replicaManager, injectedGroup, null);
-    }
-
-    public ReplicationSender(ReplicaManager replicaManager, EventLoopGroup injectedGroup, ReplicationMetrics metrics) {
+    public ReplicationSender(ReplicaManager replicaManager, ReplicationMetrics metrics) {
         this.replicaManager = Objects.requireNonNull(replicaManager, "replicaManager");
         this.metrics = metrics;
-        this.ownsEventLoopGroup = (injectedGroup == null);
-        this.eventLoopGroup = injectedGroup == null ? new NioEventLoopGroup(2) : injectedGroup;
+        this.eventLoopGroup = new NioEventLoopGroup(2);
         this.bootstrap = new Bootstrap()
                 .group(this.eventLoopGroup)
                 .channel(NioSocketChannel.class)
@@ -212,12 +203,8 @@ public class ReplicationSender {
             }
             channels.clear();
 
-            if (ownsEventLoopGroup) {
-                eventLoopGroup.shutdownGracefully(1, 2, TimeUnit.SECONDS).awaitUninterruptibly(3, TimeUnit.SECONDS);
-                log.info("EventLoopGroup shutdown complete");
-            } else {
-                log.debug("Skipping eventLoopGroup shutdown (externally managed)");
-            }
+            eventLoopGroup.shutdownGracefully(1, 2, TimeUnit.SECONDS).awaitUninterruptibly(3, TimeUnit.SECONDS);
+            log.info("EventLoopGroup shutdown complete");
             log.info("ReplicationSender shutdown complete");
         } catch (Exception e) {
             log.warn("Error during shutdown: {}", e.getMessage());
@@ -244,8 +231,7 @@ public class ReplicationSender {
             if (ch != null && ch.isActive()) {
                 ch.writeAndFlush(heartbeat).addListener(future -> {
                     if (!future.isSuccess()) {
-                        log.debug("Failed to send HEARTBEAT to replica {}: {}",
-                                replica.nodeId(), future.cause().getMessage());
+                        log.debug("Failed to send HEARTBEAT to replica {}: {}", replica.nodeId(), future.cause().getMessage());
                     }
                 });
             }
@@ -256,7 +242,7 @@ public class ReplicationSender {
         return channels.get(node.nodeId());
     }
 
-    public void updateReplicaTargets(NodeInfo newMaster, java.util.List<NodeInfo> replicas) {
+    public void updateReplicaTargets(NodeInfo newMaster, List<NodeInfo> replicas) {
         if (newMaster == null) {
             log.warn("updateReplicaTargets called with null newMaster");
             return;

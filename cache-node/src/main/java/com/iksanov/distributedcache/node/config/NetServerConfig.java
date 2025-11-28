@@ -7,6 +7,6 @@ package com.iksanov.distributedcache.node.config;
 public record NetServerConfig(String host, int port, int bossThreads, int workerThreads, int backlog,
                               int maxFrameLength, int shutdownQuietPeriodSeconds, int shutdownTimeoutSeconds) {
     public static NetServerConfig defaults() {
-        return new NetServerConfig("0.0.0.0", 7000, 1, 1, 128, 10 * 1024 * 1024, 2, 10);
+        return new NetServerConfig("0.0.0.0", 7000, 1, 2, 256, 10 * 1024 * 1024, 2, 10);
     }
 }

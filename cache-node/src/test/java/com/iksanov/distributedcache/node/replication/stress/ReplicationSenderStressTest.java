@@ -42,7 +42,7 @@ public class ReplicationSenderStressTest {
         NodeInfo replica2 = new NodeInfo("node-C", "127.0.0.1", 9002);
         replicaManager.registerReplica(master, replica1);
         replicaManager.registerReplica(master, replica2);
-        sender = new ReplicationSender(replicaManager);
+        sender = new ReplicationSender(replicaManager, null);
         int threads = 20;
         int operationsPerThread = 500;
         int totalOperations = threads * operationsPerThread;
@@ -59,11 +59,7 @@ public class ReplicationSenderStressTest {
                     startLatch.await();
                     for (int j = 0; j < operationsPerThread; j++) {
                         try {
-                            ReplicationTask task = ReplicationTask.ofSet(
-                                    "k-" + j,
-                                    "v-" + j,
-                                    master.nodeId()
-                            );
+                            ReplicationTask task = ReplicationTask.ofSet("k-" + j, "v-" + j, master.nodeId(), 0L);
                             sender.replicate(master, task);
                             successCounter.incrementAndGet();
                         } catch (Exception e) {
@@ -98,9 +94,9 @@ public class ReplicationSenderStressTest {
     void shouldHandleEmptyReplicaSet() {
         replicaManager = new ReplicaManager();
         NodeInfo master = new NodeInfo("node-A", "127.0.0.1", 9000);
-        sender = new ReplicationSender(replicaManager);
+        sender = new ReplicationSender(replicaManager, null);
         assertDoesNotThrow(() -> {
-            ReplicationTask task = ReplicationTask.ofSet("k", "v", master.nodeId());
+            ReplicationTask task = ReplicationTask.ofSet("k", "v", master.nodeId(), 0L);
             sender.replicate(master, task);
         });
     }
@@ -112,10 +108,10 @@ public class ReplicationSenderStressTest {
         NodeInfo master = new NodeInfo("node-A", "127.0.0.1", 9000);
         NodeInfo validReplica = new NodeInfo("node-B", "127.0.0.1", 9001);
         replicaManager.registerReplica(master, validReplica);
-        sender = new ReplicationSender(replicaManager);
+        sender = new ReplicationSender(replicaManager, null);
 
         assertDoesNotThrow(() -> {
-            ReplicationTask task = ReplicationTask.ofSet("k", "v", master.nodeId());
+            ReplicationTask task = ReplicationTask.ofSet("k", "v", master.nodeId(), 0L);
             sender.replicate(master, task);
         });
     }
@@ -127,9 +123,9 @@ public class ReplicationSenderStressTest {
         NodeInfo master = new NodeInfo("node-A", "127.0.0.1", 9000);
         NodeInfo replica = new NodeInfo("node-B", "127.0.0.1", 9001);
         replicaManager.registerReplica(master, replica);
-        sender = new ReplicationSender(replicaManager);
+        sender = new ReplicationSender(replicaManager, null);
         for (int i = 0; i < 10; i++) {
-            ReplicationTask task = ReplicationTask.ofSet("k" + i, "v" + i, master.nodeId());
+            ReplicationTask task = ReplicationTask.ofSet("k" + i, "v" + i, master.nodeId(), 0L);
             sender.replicate(master, task);
         }
         Thread.sleep(100);
@@ -144,15 +140,11 @@ public class ReplicationSenderStressTest {
         NodeInfo master = new NodeInfo("node-A", "127.0.0.1", 9000);
         NodeInfo replica = new NodeInfo("node-B", "127.0.0.1", 9001);
         replicaManager.registerReplica(master, replica);
-        sender = new ReplicationSender(replicaManager);
+        sender = new ReplicationSender(replicaManager, null);
         int operationCount = 1000;
         long startTime = System.nanoTime();
         for (int i = 0; i < operationCount; i++) {
-            ReplicationTask task = ReplicationTask.ofSet(
-                    "rapid-key-" + i,
-                    "value-" + i,
-                    master.nodeId()
-            );
+            ReplicationTask task = ReplicationTask.ofSet("rapid-key-" + i, "value-" + i, master.nodeId(), 0L);
             sender.replicate(master, task);
         }
 
@@ -171,7 +163,7 @@ public class ReplicationSenderStressTest {
         NodeInfo master = new NodeInfo("node-A", "127.0.0.1", 9000);
         NodeInfo replica = new NodeInfo("node-B", "127.0.0.1", 9001);
         replicaManager.registerReplica(master, replica);
-        sender = new ReplicationSender(replicaManager);
+        sender = new ReplicationSender(replicaManager, null);
 
         int operationCount = 500;
         AtomicInteger setCount = new AtomicInteger(0);
@@ -179,10 +171,10 @@ public class ReplicationSenderStressTest {
         for (int i = 0; i < operationCount; i++) {
             ReplicationTask task;
             if (i % 3 == 0) {
-                task = ReplicationTask.ofDelete("key-" + i, master.nodeId());
+                task = ReplicationTask.ofDelete("key-" + i, master.nodeId(), 0L);
                 deleteCount.incrementAndGet();
             } else {
-                task = ReplicationTask.ofSet("key-" + i, "value-" + i, master.nodeId());
+                task = ReplicationTask.ofSet("key-" + i, "value-" + i, master.nodeId(), 0L);
                 setCount.incrementAndGet();
             }
             sender.replicate(master, task);

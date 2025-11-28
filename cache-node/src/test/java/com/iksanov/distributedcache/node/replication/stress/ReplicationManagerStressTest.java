@@ -94,11 +94,7 @@ public class ReplicationManagerStressTest {
             executor.submit(() -> {
                 try {
                     for (int j = 0; j < tasksPerThread; j++) {
-                        ReplicationTask task = ReplicationTask.ofSet(
-                                "k-" + j,
-                                "val-" + j,
-                                "node-B"
-                        );
+                        ReplicationTask task = ReplicationTask.ofSet("k-" + j, "val-" + j, "node-B", 0L);
                         manager.onReplicationReceived(task);
                         receivedCounter.incrementAndGet();
                     }
@@ -137,11 +133,7 @@ public class ReplicationManagerStressTest {
                     for (int j = 0; j < opsPerThread; j++) {
                         String key = "k-" + Thread.currentThread().getId() + "-" + j;
                         if (j % 4 == 0) {
-                            ReplicationTask incoming = ReplicationTask.ofSet(
-                                    key,
-                                    "v-" + j,
-                                    "node-B"
-                            );
+                            ReplicationTask incoming = ReplicationTask.ofSet(key, "v-" + j, "node-B", 0L);
                             manager.onReplicationReceived(incoming);
                             incomingOpsCounter.incrementAndGet();
                         } else if (j % 5 == 0) {
@@ -241,11 +233,7 @@ public class ReplicationManagerStressTest {
 
         assertDoesNotThrow(() -> {
             for (int i = 0; i < 100; i++) {
-                ReplicationTask task = ReplicationTask.ofSet(
-                        "k-" + i,
-                        "v-" + i,
-                        "node-B"
-                );
+                ReplicationTask task = ReplicationTask.ofSet("k-" + i, "v-" + i, "node-B", 0L);
                 manager.onReplicationReceived(task);
             }
         });

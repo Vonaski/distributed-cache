@@ -10,13 +10,8 @@ import io.netty.handler.codec.http.*;
 import io.netty.util.CharsetUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import java.nio.charset.StandardCharsets;
 
-/**
- * Simple server for exposing Prometheus metrics.
- * Runs on a separate port (default: 8081) from the main cache port.
- */
 public class MetricsServer {
 
     private static final Logger log = LoggerFactory.getLogger(MetricsServer.class);

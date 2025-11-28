@@ -52,7 +52,7 @@ public class ConsistentHashRing {
         }
         for (int h : hashes) ring.remove(h);
         log.debug("Removed node {} ({} virtual nodes)", nodeId, hashes.size());
-        return false;
+        return true;
     }
 
     public NodeInfo getNodeForKey(String key) {

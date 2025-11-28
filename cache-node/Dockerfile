@@ -21,12 +21,4 @@ COPY --from=builder /app/cache-node/target/cache-node-1.0-SNAPSHOT.jar app.jar
 
 RUN mkdir -p /data
 
-EXPOSE 7000 7001 7002 7100 7101 7102 8081
-
-ENV NODE_ID=node-1
-ENV NODE_PORT=7000
-ENV REPLICATION_PORT=7100
-ENV METRICS_PORT=8081
-ENV IS_MASTER=true
-
 ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

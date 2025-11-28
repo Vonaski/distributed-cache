@@ -33,7 +33,7 @@ class ReplicationSenderTest {
     @BeforeEach
     void setUp() {
         replicaManager = mock(ReplicaManager.class);
-        sender = new ReplicationSender(replicaManager);
+        sender = new ReplicationSender(replicaManager, null);
         master = new NodeInfo("node-A", "127.0.0.1", 9001);
         replicaA = new NodeInfo("node-B", "127.0.0.1", 9002);
         replicaB = new NodeInfo("node-C", "127.0.0.1", 9003);
@@ -51,28 +51,28 @@ class ReplicationSenderTest {
         replicas.add(replicaA);
         replicas.add(null);
         when(replicaManager.getReplicas(master)).thenReturn(replicas);
-        assertDoesNotThrow(() -> sender.replicate(master, ReplicationTask.ofSet("k", "v", master.nodeId())));
+        assertDoesNotThrow(() -> sender.replicate(master, ReplicationTask.ofSet("k", "v", master.nodeId(), 0L)));
     }
 
     @Test
     @DisplayName("replicate() should skip self (master == replica) without throwing")
     void shouldSkipSelfReplicas() {
         when(replicaManager.getReplicas(master)).thenReturn(Set.of(master, replicaA));
-        assertDoesNotThrow(() -> sender.replicate(master, ReplicationTask.ofSet("k", "v", master.nodeId())));
+        assertDoesNotThrow(() -> sender.replicate(master, ReplicationTask.ofSet("k", "v", master.nodeId(), 0L)));
     }
 
     @Test
     @DisplayName("replicate() should handle empty replica set gracefully")
     void shouldHandleEmptyReplicaSet() {
         when(replicaManager.getReplicas(master)).thenReturn(Set.of());
-        assertDoesNotThrow(() -> sender.replicate(master, ReplicationTask.ofSet("k", "v", master.nodeId())));
+        assertDoesNotThrow(() -> sender.replicate(master, ReplicationTask.ofSet("k", "v", master.nodeId(), 0L)));
     }
 
     @Test
     @DisplayName("replicate() should handle null replica set from manager")
     void shouldHandleNullReplicaSet() {
         when(replicaManager.getReplicas(master)).thenReturn(null);
-        assertDoesNotThrow(() -> sender.replicate(master, ReplicationTask.ofSet("k", "v", master.nodeId())));
+        assertDoesNotThrow(() -> sender.replicate(master, ReplicationTask.ofSet("k", "v", master.nodeId(), 0L)));
     }
 
     @Test
@@ -85,8 +85,8 @@ class ReplicationSenderTest {
         when(mockChannel.writeAndFlush(any())).thenReturn(writeFuture);
         doAnswer(inv -> null).when(writeFuture).addListener(any());
         sender.channelsMap().put(replicaA.nodeId(), mockChannel);
-        sender.replicate(master, ReplicationTask.ofSet("k1", "v1", master.nodeId()));
-        sender.replicate(master, ReplicationTask.ofSet("k2", "v2", master.nodeId()));
+        sender.replicate(master, ReplicationTask.ofSet("k1", "v1", master.nodeId(), 0L));
+        sender.replicate(master, ReplicationTask.ofSet("k2", "v2", master.nodeId(), 0L));
         verify(mockChannel, times(2)).writeAndFlush(any(ReplicationTask.class));
     }
 
@@ -105,7 +105,7 @@ class ReplicationSenderTest {
             return null;
         }).when(failFuture).addListener(any());
         sender.channelsMap().put(replicaA.nodeId(), mockChannel);
-        sender.replicate(master, ReplicationTask.ofSet("k", "v", master.nodeId()));
+        sender.replicate(master, ReplicationTask.ofSet("k", "v", master.nodeId(), 0L));
         assertFalse(sender.channelsMap().containsKey(replicaA.nodeId()), "Channel should be removed after write failure");
     }
 
@@ -116,7 +116,7 @@ class ReplicationSenderTest {
         Channel inactiveChannel = mock(Channel.class);
         when(inactiveChannel.isActive()).thenReturn(false);
         sender.channelsMap().put(replicaA.nodeId(), inactiveChannel);
-        assertDoesNotThrow(() -> sender.replicate(master, ReplicationTask.ofSet("k", "v", master.nodeId())));
+        assertDoesNotThrow(() -> sender.replicate(master, ReplicationTask.ofSet("k", "v", master.nodeId(), 0L)));
     }
 
     @Test
@@ -135,7 +135,7 @@ class ReplicationSenderTest {
         doAnswer(inv -> null).when(futureB).addListener(any());
         sender.channelsMap().put(replicaA.nodeId(), channelA);
         sender.channelsMap().put(replicaB.nodeId(), channelB);
-        sender.replicate(master, ReplicationTask.ofSet("k", "v", master.nodeId()));
+        sender.replicate(master, ReplicationTask.ofSet("k", "v", master.nodeId(), 0L));
         verify(channelA, times(1)).writeAndFlush(any(ReplicationTask.class));
         verify(channelB, times(1)).writeAndFlush(any(ReplicationTask.class));
     }

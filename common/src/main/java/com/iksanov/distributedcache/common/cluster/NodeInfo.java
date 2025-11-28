@@ -1,7 +1,5 @@
 package com.iksanov.distributedcache.common.cluster;
 
-import java.util.Objects;
-
 public record NodeInfo(String nodeId, String host, int port, int replicationPort) {
 
     public NodeInfo {
@@ -13,22 +11,6 @@ public record NodeInfo(String nodeId, String host, int port, int replicationPort
 
     public NodeInfo(String nodeId, String host, int port) {
         this(nodeId, host, port, port + 1000);
-    }
-
-    public int replicationPort() {
-        return replicationPort;
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (!(o instanceof NodeInfo that)) return false;
-        return Objects.equals(this.nodeId, that.nodeId);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(nodeId);
     }
 
     @Override

@@ -31,13 +31,13 @@ public class ReplicationReceiverTest {
 
     @BeforeEach
     void setUp() {
-        receiver = new ReplicationReceiver("127.0.0.1", 0, store, 1024 * 1024, "node-A");
+        receiver = new ReplicationReceiver("127.0.0.1", 0, store, 1024 * 1024, "node-A", null);
     }
 
     @Test
     @DisplayName("applyTask() should apply SET task to store")
     void shouldApplySetTask() {
-        ReplicationTask task = ReplicationTask.ofSet("key-1", "value-1", "node-B");
+        ReplicationTask task = ReplicationTask.ofSet("key-1", "value-1", "node-B", 0L);
         receiver.applyTask(task);
         verify(store, times(1)).put("key-1", "value-1");
     }
@@ -45,7 +45,7 @@ public class ReplicationReceiverTest {
     @Test
     @DisplayName("applyTask() should apply DELETE task to store")
     void shouldApplyDeleteTask() {
-        ReplicationTask task = ReplicationTask.ofDelete("key-2", "node-B");
+        ReplicationTask task = ReplicationTask.ofDelete("key-2", "node-B", 0L);
         receiver.applyTask(task);
         verify(store, times(1)).delete("key-2");
     }
@@ -53,7 +53,7 @@ public class ReplicationReceiverTest {
     @Test
     @DisplayName("applyTask() should ignore self-origin tasks to prevent loops")
     void shouldIgnoreSelfOriginTasks() {
-        ReplicationTask selfTask = ReplicationTask.ofSet("key-self", "value-self", "node-A");
+        ReplicationTask selfTask = ReplicationTask.ofSet("key-self", "value-self", "node-A", 0L);
         receiver.applyTask(selfTask);
         verify(store, never()).put(anyString(), anyString());
         verify(store, never()).delete(anyString());
@@ -62,7 +62,7 @@ public class ReplicationReceiverTest {
     @Test
     @DisplayName("applyTask() should apply tasks from different origins")
     void shouldApplyTasksFromDifferentOrigins() {
-        ReplicationTask externalTask = ReplicationTask.ofSet("key-ext", "value-ext", "node-B");
+        ReplicationTask externalTask = ReplicationTask.ofSet("key-ext", "value-ext", "node-B", 0L);
         receiver.applyTask(externalTask);
         verify(store, times(1)).put("key-ext", "value-ext");
     }
@@ -78,8 +78,8 @@ public class ReplicationReceiverTest {
     @Test
     @DisplayName("applyTask() should apply task when receiver has no nodeId")
     void shouldApplyTaskWhenNodeIdIsNull() {
-        ReplicationReceiver receiverNoId = new ReplicationReceiver("127.0.0.1", 0, store);
-        ReplicationTask task = ReplicationTask.ofSet("key", "value", "any-origin");
+        ReplicationReceiver receiverNoId = new ReplicationReceiver("127.0.0.1", 0, store, 1024 * 1024, null, null);
+        ReplicationTask task = ReplicationTask.ofSet("key", "value", "any-origin", 0L);
         receiverNoId.applyTask(task);
         verify(store, times(1)).put("key", "value");
     }
@@ -88,8 +88,8 @@ public class ReplicationReceiverTest {
     @DisplayName("applyTask() should ignore task when origin exactly matches nodeId")
     void shouldIgnoreTaskWhenOriginMatchesNodeId() {
         String nodeId = "node-X";
-        ReplicationReceiver receiverX = new ReplicationReceiver("127.0.0.1", 0, store, 1024, nodeId);
-        ReplicationTask taskFromSelf = ReplicationTask.ofSet("k", "v", nodeId);
+        ReplicationReceiver receiverX = new ReplicationReceiver("127.0.0.1", 0, store, 1024, nodeId, null);
+        ReplicationTask taskFromSelf = ReplicationTask.ofSet("k", "v", nodeId, 0L);
         receiverX.applyTask(taskFromSelf);
         verify(store, never()).put(anyString(), anyString());
     }
@@ -97,9 +97,9 @@ public class ReplicationReceiverTest {
     @Test
     @DisplayName("applyTask() should handle multiple SET tasks sequentially")
     void shouldHandleMultipleSetTasks() {
-        ReplicationTask task1 = ReplicationTask.ofSet("k1", "v1", "node-B");
-        ReplicationTask task2 = ReplicationTask.ofSet("k2", "v2", "node-B");
-        ReplicationTask task3 = ReplicationTask.ofSet("k3", "v3", "node-C");
+        ReplicationTask task1 = ReplicationTask.ofSet("k1", "v1", "node-B", 0L);
+        ReplicationTask task2 = ReplicationTask.ofSet("k2", "v2", "node-B", 0L);
+        ReplicationTask task3 = ReplicationTask.ofSet("k3", "v3", "node-C", 0L);
         receiver.applyTask(task1);
         receiver.applyTask(task2);
         receiver.applyTask(task3);
@@ -111,8 +111,8 @@ public class ReplicationReceiverTest {
     @Test
     @DisplayName("applyTask() should handle multiple DELETE tasks sequentially")
     void shouldHandleMultipleDeleteTasks() {
-        ReplicationTask del1 = ReplicationTask.ofDelete("k1", "node-B");
-        ReplicationTask del2 = ReplicationTask.ofDelete("k2", "node-C");
+        ReplicationTask del1 = ReplicationTask.ofDelete("k1", "node-B", 0L);
+        ReplicationTask del2 = ReplicationTask.ofDelete("k2", "node-C", 0L);
         receiver.applyTask(del1);
         receiver.applyTask(del2);
         verify(store, times(1)).delete("k1");
@@ -122,8 +122,8 @@ public class ReplicationReceiverTest {
     @Test
     @DisplayName("applyTask() should handle mixed SET and DELETE operations")
     void shouldHandleMixedOperations() {
-        ReplicationTask set = ReplicationTask.ofSet("key", "value", "node-B");
-        ReplicationTask delete = ReplicationTask.ofDelete("key", "node-B");
+        ReplicationTask set = ReplicationTask.ofSet("key", "value", "node-B", 0L);
+        ReplicationTask delete = ReplicationTask.ofDelete("key", "node-B", 0L);
         receiver.applyTask(set);
         receiver.applyTask(delete);
         verify(store, times(1)).put("key", "value");
@@ -134,7 +134,7 @@ public class ReplicationReceiverTest {
     @DisplayName("applyTask() should preserve timestamp from replication task")
     void shouldPreserveTimestamp() {
         long customTimestamp = 1234567890L;
-        ReplicationTask task = new ReplicationTask("key", "value", ReplicationTask.Operation.SET, customTimestamp, "node-B");
+        ReplicationTask task = new ReplicationTask("key", "value", ReplicationTask.Operation.SET, customTimestamp, "node-B", 0L);
         receiver.applyTask(task);
         verify(store, times(1)).put("key", "value");
     }
@@ -142,22 +142,21 @@ public class ReplicationReceiverTest {
     @Test
     @DisplayName("Constructor should throw NPE for null host")
     void shouldThrowOnNullHost() {
-        assertThrows(NullPointerException.class, () -> new ReplicationReceiver(null, 9000, store));
+        assertThrows(NullPointerException.class, () -> new ReplicationReceiver(null, 9000, store, 1024, null, null));
     }
 
     @Test
     @DisplayName("Constructor should throw NPE for null store")
     void shouldThrowOnNullStore() {
-        assertThrows(NullPointerException.class, () -> new ReplicationReceiver("127.0.0.1", 9000, null));
+        assertThrows(NullPointerException.class, () -> new ReplicationReceiver("127.0.0.1", 9000, null, 1024, null, null));
     }
 
     @Test
     @DisplayName("Constructor should accept all valid parameter combinations")
     void shouldAcceptValidConstructorParameters() {
         assertDoesNotThrow(() -> {
-            new ReplicationReceiver("127.0.0.1", 9000, store);
-            new ReplicationReceiver("127.0.0.1", 9000, store, 1024);
-            new ReplicationReceiver("127.0.0.1", 9000, store, 1024, "node-id");
+            new ReplicationReceiver("127.0.0.1", 9000, store, 1024, null, null);
+            new ReplicationReceiver("127.0.0.1", 9000, store, 1024, "node-id", null);
         });
     }
 
@@ -171,14 +170,14 @@ public class ReplicationReceiverTest {
     @DisplayName("applyTask() should not throw when store throws exception")
     void shouldHandleStoreExceptions() {
         doThrow(new RuntimeException("Store failure")).when(store).put(anyString(), anyString());
-        ReplicationTask task = ReplicationTask.ofSet("key", "value", "node-B");
+        ReplicationTask task = ReplicationTask.ofSet("key", "value", "node-B", 0L);
         assertDoesNotThrow(() -> receiver.applyTask(task), "Should not propagate store exceptions");
     }
 
     @Test
     @DisplayName("Should ignore out-of-order replication tasks")
     void shouldIgnoreOutOfOrderTasks() {
-        ReplicationReceiver receiver = new ReplicationReceiver("127.0.0.1", 0, store, 1024, "node-A");
+        ReplicationReceiver receiver = new ReplicationReceiver("127.0.0.1", 0, store, 1024, "node-A", null);
         ReplicationTask task2 = new ReplicationTask("key", "value2", ReplicationTask.Operation.SET, System.currentTimeMillis(), "node-B", 2L);
         ReplicationTask task1 = new ReplicationTask("key", "value1", ReplicationTask.Operation.SET, System.currentTimeMillis(), "node-B", 1L);
         ReplicationTask task3 = new ReplicationTask("key", "value3", ReplicationTask.Operation.SET, System.currentTimeMillis(), "node-B", 3L);

@@ -1,16 +1,7 @@
 version: '3.8'
 
-# Production docker-compose for VPS2
 # Components: Proxy-3, Master-2, Master-3, Replica-1, Promtail, Grafana, Loki
-# VPS2: 4 vCPU, 8GB RAM
-# Masters: 2 (Master-2, Master-3)
-# Replicas: 1 (Replica-1 from Master-1)
-# IP will be substituted during deployment
-
 services:
-  # ============================================
-  # Proxy-3 - VPS2
-  # ============================================
   proxy-3:
     image: ${REGISTRY}/proxy:${TAG:-latest}
     container_name: proxy-3
@@ -47,9 +38,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # ============================================
-  # Cache Master-2 - VPS2
-  # ============================================
   cache-master-2:
     image: ${REGISTRY}/cache-node:${TAG:-latest}
     container_name: cache-master-2
@@ -87,9 +75,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # ============================================
-  # Cache Master-3 - VPS2
-  # ============================================
   cache-master-3:
     image: ${REGISTRY}/cache-node:${TAG:-latest}
     container_name: cache-master-3
@@ -127,10 +112,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # ============================================
-  # Cache Replica-1 - VPS2
-  # Replicates Master-1 from VPS1
-  # ============================================
   cache-replica-1:
     image: ${REGISTRY}/cache-node:${TAG:-latest}
     container_name: cache-replica-1
@@ -168,10 +149,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # ============================================
-  # Promtail - VPS2 only
-  # Collects logs from Docker and sends to Loki locally
-  # ============================================
   promtail:
     image: grafana/promtail:latest
     container_name: promtail
@@ -200,9 +177,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # ============================================
-  # Grafana - VPS2 only
-  # ============================================
   grafana:
     image: grafana/grafana:latest
     container_name: grafana
@@ -236,9 +210,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # ============================================
-  # Loki - VPS2 only
-  # ============================================
   loki:
     image: grafana/loki:latest
     container_name: loki
@@ -265,9 +236,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-# ============================================
-# Networks
-# ============================================
 networks:
   cache-network:
     driver: bridge
@@ -275,9 +243,6 @@ networks:
       config:
         - subnet: 172.20.0.0/16
 
-# ============================================
-# Volumes for data persistence
-# ============================================
 volumes:
   cache-master-2-data:
   cache-master-3-data:
