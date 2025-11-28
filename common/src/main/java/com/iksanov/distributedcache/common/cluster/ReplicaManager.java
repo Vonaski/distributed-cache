@@ -17,7 +17,7 @@ public class ReplicaManager {
         Objects.requireNonNull(replica, "replica is null");
 
         masterToReplicas.computeIfAbsent(master.nodeId(),
-                k -> ConcurrentHashMap.newKeySet())
+                        k -> ConcurrentHashMap.newKeySet())
                 .add(replica);
         replicaToMaster.put(replica.nodeId(), master);
 

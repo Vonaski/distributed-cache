@@ -143,7 +143,7 @@ public class ReplicationManagerTest {
     @Test
     @DisplayName("Should synchronously apply received replication task")
     void onReplicationReceived_shouldApplyTask() {
-        ReplicationTask task = ReplicationTask.ofSet("remote-key", "remote-value", "node-B");
+        ReplicationTask task = ReplicationTask.ofSet("remote-key", "remote-value", "node-B", 0L);
         manager.onReplicationReceived(task);
         verify(receiver).applyTask(task);
     }
@@ -151,7 +151,7 @@ public class ReplicationManagerTest {
     @Test
     @DisplayName("Should handle receiver errors without propagating")
     void onReplicationReceived_shouldHandleErrors() {
-        ReplicationTask task = ReplicationTask.ofSet("key", "value", "node-B");
+        ReplicationTask task = ReplicationTask.ofSet("key", "value", "node-B", 0L);
         doThrow(new RuntimeException("Storage error")).when(receiver).applyTask(any());
         assertDoesNotThrow(() -> manager.onReplicationReceived(task));
         verify(receiver).applyTask(task);

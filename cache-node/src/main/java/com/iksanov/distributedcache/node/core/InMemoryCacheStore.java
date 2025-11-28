@@ -22,16 +22,16 @@ public class InMemoryCacheStore implements CacheStore {
     private final long defaultTtlMillis;
     private final ReentrantLock evictionLock = new ReentrantLock();
     private final CacheMetrics metrics;
-    private static final int SAMPLE_SIZE = 8;
-    private static final int EVICTION_BATCH = 5;
+    private static final int SAMPLE_SIZE = 15;
+    private static final int EVICTION_BATCH = 10;
     private final AtomicInteger putCounter = new AtomicInteger();
     private static final int LAZY_CLEANUP_INTERVAL = 100;
 
-    public InMemoryCacheStore(int maxSize, long defaultTtlMillis, long cleanupIntervalMillis) {
-        this(maxSize, defaultTtlMillis, cleanupIntervalMillis, new CacheMetrics());
+    public InMemoryCacheStore(int maxSize, long defaultTtlMillis) {
+        this(maxSize, defaultTtlMillis, new CacheMetrics());
     }
 
-    public InMemoryCacheStore(int maxSize, long defaultTtlMillis, long cleanupIntervalMillis, CacheMetrics metrics) {
+    public InMemoryCacheStore(int maxSize, long defaultTtlMillis, CacheMetrics metrics) {
         if (maxSize <= 0) throw new CacheException("maxSize must be > 0");
         this.maxSize = maxSize;
         this.defaultTtlMillis = defaultTtlMillis;
@@ -147,15 +147,12 @@ public class InMemoryCacheStore implements CacheStore {
         int currentOverflow = store.size() - maxSize;
         int toEvict = Math.max(EVICTION_BATCH * 2, currentOverflow + EVICTION_BATCH);
 
-        int evicted = 0;
         for (int i = 0; i < toEvict && store.size() > maxSize; i++) {
             CacheEntry victim = findEvictionCandidate();
             if (victim != null && store.remove(victim.key, victim)) {
                 metrics.recordEviction();
-                evicted++;
             }
         }
-        if (evicted > 0) log.info("Aggressive eviction completed: removed {} entries, size now {}/{}", evicted, store.size(), maxSize);
     }
 
     private CacheEntry findEvictionCandidate() {

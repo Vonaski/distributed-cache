@@ -43,18 +43,6 @@ public final class ReplicationReceiver {
     private volatile boolean running = false;
     private final ConcurrentMap<String, Long> lastAppliedSequence = new ConcurrentHashMap<>();
 
-    public ReplicationReceiver(String host, int port, CacheStore store) {
-        this(host, port, store, DEFAULT_MAX_FRAME_LENGTH, null, null);
-    }
-
-    public ReplicationReceiver(String host, int port, CacheStore store, int maxFrameLength) {
-        this(host, port, store, maxFrameLength, null, null);
-    }
-
-    public ReplicationReceiver(String host, int port, CacheStore store, int maxFrameLength, String nodeId) {
-        this(host, port, store, maxFrameLength, nodeId, null);
-    }
-
     public ReplicationReceiver(String host, int port, CacheStore store, int maxFrameLength, String nodeId, ReplicationMetrics metrics) {
         this.host = Objects.requireNonNull(host, "host");
         this.port = port;

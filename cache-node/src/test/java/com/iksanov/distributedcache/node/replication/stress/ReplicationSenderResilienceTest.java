@@ -43,16 +43,12 @@ public class ReplicationSenderResilienceTest {
         NodeInfo unreachableReplica2 = new NodeInfo("node-C", "127.0.0.1", 9002);
         replicaManager.registerReplica(master, unreachableReplica1);
         replicaManager.registerReplica(master, unreachableReplica2);
-        sender = new ReplicationSender(replicaManager);
+        sender = new ReplicationSender(replicaManager, null);
         int operationCount = 100;
         AtomicInteger attemptedOperations = new AtomicInteger(0);
         assertDoesNotThrow(() -> {
             for (int i = 0; i < operationCount; i++) {
-                ReplicationTask task = ReplicationTask.ofSet(
-                        "key-" + i,
-                        "value-" + i,
-                        master.nodeId()
-                );
+                ReplicationTask task = ReplicationTask.ofSet("key-" + i, "value-" + i, master.nodeId(), 0L);
                 sender.replicate(master, task);
                 attemptedOperations.incrementAndGet();
             }
@@ -72,7 +68,7 @@ public class ReplicationSenderResilienceTest {
         NodeInfo replica2 = new NodeInfo("node-C", "127.0.0.1", 9002);
         replicaManager.registerReplica(master, replica1);
         replicaManager.registerReplica(master, replica2);
-        sender = new ReplicationSender(replicaManager);
+        sender = new ReplicationSender(replicaManager, null);
         int threads = 16;
         int operationsPerThread = 500;
         int totalOperations = threads * operationsPerThread;
@@ -88,11 +84,7 @@ public class ReplicationSenderResilienceTest {
                     startLatch.await();
                     for (int j = 0; j < operationsPerThread; j++) {
                         try {
-                            ReplicationTask task = ReplicationTask.ofSet(
-                                    "k-" + j,
-                                    "v-" + j,
-                                    master.nodeId()
-                            );
+                            ReplicationTask task = ReplicationTask.ofSet("k-" + j, "v-" + j, master.nodeId(), 0L);
                             sender.replicate(master, task);
                             successCounter.incrementAndGet();
                         } catch (Exception e) {
@@ -131,16 +123,12 @@ public class ReplicationSenderResilienceTest {
         NodeInfo master = new NodeInfo("node-A", "127.0.0.1", 9000);
         NodeInfo replica = new NodeInfo("node-B", "127.0.0.1", 9001);
         replicaManager.registerReplica(master, replica);
-        sender = new ReplicationSender(replicaManager);
+        sender = new ReplicationSender(replicaManager, null);
         int cycles = 50;
 
         for (int i = 0; i < cycles; i++) {
             for (int j = 0; j < 10; j++) {
-                ReplicationTask task = ReplicationTask.ofSet(
-                        "key-" + j,
-                        "value-" + i + "-" + j,
-                        master.nodeId()
-                );
+                ReplicationTask task = ReplicationTask.ofSet("key-" + j, "value-" + i + "-" + j, master.nodeId(), 0L);
                 sender.replicate(master, task);
             }
             Thread.sleep(10);
@@ -159,14 +147,10 @@ public class ReplicationSenderResilienceTest {
         replicaManager.registerReplica(master, replica1);
         replicaManager.registerReplica(master, replica2);
         replicaManager.registerReplica(master, replica3);
-        sender = new ReplicationSender(replicaManager);
+        sender = new ReplicationSender(replicaManager, null);
         int operationCount = 200;
         for (int i = 0; i < operationCount; i++) {
-            ReplicationTask task = ReplicationTask.ofSet(
-                    "key-" + i,
-                    "value-" + i,
-                    master.nodeId()
-            );
+            ReplicationTask task = ReplicationTask.ofSet("key-" + i, "value-" + i, master.nodeId(), 0L);
             assertDoesNotThrow(() -> sender.replicate(master, task), "Replication should not throw even with mixed replica availability");
         }
         System.out.printf("Mixed availability test: %d operations completed%n", operationCount);
@@ -179,16 +163,12 @@ public class ReplicationSenderResilienceTest {
         NodeInfo master = new NodeInfo("node-A", "127.0.0.1", 9000);
         NodeInfo replica = new NodeInfo("node-B", "127.0.0.1", 9001);
         replicaManager.registerReplica(master, replica);
-        sender = new ReplicationSender(replicaManager);
+        sender = new ReplicationSender(replicaManager, null);
         int totalOperations = 5000;
         long startTime = System.nanoTime();
 
         for (int i = 0; i < totalOperations; i++) {
-            ReplicationTask task = ReplicationTask.ofSet(
-                    "sustained-key-" + i,
-                    "value-" + i,
-                    master.nodeId()
-            );
+            ReplicationTask task = ReplicationTask.ofSet("sustained-key-" + i, "value-" + i, master.nodeId(), 0L);
             sender.replicate(master, task);
         }
         long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime);
@@ -209,17 +189,13 @@ public class ReplicationSenderResilienceTest {
         NodeInfo replica2 = new NodeInfo("node-C", "127.0.0.1", 9002);
         replicaManager.registerReplica(master, replica1);
         replicaManager.registerReplica(master, replica2);
-        sender = new ReplicationSender(replicaManager);
+        sender = new ReplicationSender(replicaManager, null);
         ExecutorService executor = Executors.newFixedThreadPool(2);
 
         Future<?> replicationTask = executor.submit(() -> {
             for (int i = 0; i < 200; i++) {
                 try {
-                    ReplicationTask task = ReplicationTask.ofSet(
-                            "key-" + i,
-                            "value-" + i,
-                            master.nodeId()
-                    );
+                    ReplicationTask task = ReplicationTask.ofSet("key-" + i, "value-" + i, master.nodeId(), 0L);
                     sender.replicate(master, task);
                     Thread.sleep(5);
                 } catch (InterruptedException e) {
@@ -252,14 +228,10 @@ public class ReplicationSenderResilienceTest {
         NodeInfo master = new NodeInfo("node-A", "127.0.0.1", 9000);
         NodeInfo replica = new NodeInfo("node-B", "127.0.0.1", 9001);
         replicaManager.registerReplica(master, replica);
-        sender = new ReplicationSender(replicaManager);
+        sender = new ReplicationSender(replicaManager, null);
 
         for (int i = 0; i < 500; i++) {
-            ReplicationTask task = ReplicationTask.ofSet(
-                    "fail-key-" + i,
-                    "value-" + i,
-                    master.nodeId()
-            );
+            ReplicationTask task = ReplicationTask.ofSet("fail-key-" + i, "value-" + i, master.nodeId(), 0L);
             sender.replicate(master, task);
         }
         assertDoesNotThrow(() -> sender.shutdown(), "Shutdown must succeed even after many failures");

@@ -5,7 +5,6 @@ import com.iksanov.distributedcache.common.cluster.ReplicaManager;
 import com.iksanov.distributedcache.node.core.CacheStore;
 import com.iksanov.distributedcache.node.core.InMemoryCacheStore;
 import com.iksanov.distributedcache.node.replication.*;
-import io.netty.channel.nio.NioEventLoopGroup;
 import org.junit.jupiter.api.*;
 
 import java.util.concurrent.TimeUnit;
@@ -26,7 +25,6 @@ public class ReplicationLoadTest {
     private static final int OPERATION_COUNT = 1000;
     private static final long WAIT_TIMEOUT_MS = 10_000;
 
-    private NioEventLoopGroup sharedEventLoopGroup;
     private ReplicationManager masterReplicationManager;
     private ReplicationSender sender;
     private CacheStore masterStore;
@@ -39,25 +37,29 @@ public class ReplicationLoadTest {
 
     @BeforeAll
     void setup() throws Exception {
-        sharedEventLoopGroup = new NioEventLoopGroup(4);
-
         masterNode = new NodeInfo("master-load", "127.0.0.1", 9800);
         replicaNode = new NodeInfo("replica-load", "127.0.0.1", 9801);
 
-        masterStore = new InMemoryCacheStore(100_000, 0, 5_000);
-        replicaStore = new InMemoryCacheStore(100_000, 0, 5_000);
+        masterStore = new InMemoryCacheStore(100_000, 0);
+        replicaStore = new InMemoryCacheStore(100_000, 0);
 
         replicaReceiver = new ReplicationReceiver(
                 replicaNode.host(),
                 replicaNode.replicationPort(),
-                replicaStore
+                replicaStore,
+                1024 * 1024,
+                replicaNode.nodeId(),
+                null
         );
         replicaReceiver.start();
 
         masterReceiver = new ReplicationReceiver(
                 masterNode.host(),
                 masterNode.replicationPort(),
-                masterStore
+                masterStore,
+                1024 * 1024,
+                masterNode.nodeId(),
+                null
         );
         masterReceiver.start();
 
@@ -66,7 +68,7 @@ public class ReplicationLoadTest {
         replicaManager = new ReplicaManager();
         replicaManager.registerReplica(masterNode, replicaNode);
 
-        sender = new ReplicationSender(replicaManager, sharedEventLoopGroup);
+        sender = new ReplicationSender(replicaManager, null);
 
         masterReplicationManager = new ReplicationManager(
                 masterNode,
@@ -108,10 +110,6 @@ public class ReplicationLoadTest {
             } catch (Exception e) {
                 System.err.println("Error stopping master receiver: " + e);
             }
-        }
-
-        if (sharedEventLoopGroup != null) {
-            sharedEventLoopGroup.shutdownGracefully();
         }
 
         System.out.println("Shutdown complete");

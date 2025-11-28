@@ -45,7 +45,7 @@ public class NetServerIntegrationTest {
 
     @BeforeAll
     void setUp() {
-        InMemoryCacheStore store = new InMemoryCacheStore(10_000, 60_000, 5_000, cacheMetrics);
+        InMemoryCacheStore store = new InMemoryCacheStore(10_000, 60_000, cacheMetrics);
 
         NetServerConfig config = new NetServerConfig(
                 HOST,

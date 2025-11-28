@@ -84,7 +84,7 @@ public class ReplicationReceiverIntegrationTest {
     public void shouldStartServerAndAcceptConnections() throws Exception {
         int port = freePort();
         store = new TestCacheStore();
-        receiver = new ReplicationReceiver("127.0.0.1", port, store);
+        receiver = new ReplicationReceiver("127.0.0.1", port, store, 1024 * 1024, null, null);
         
         receiver.start();
         awaitRunning(receiver, 2000);
@@ -97,14 +97,14 @@ public class ReplicationReceiverIntegrationTest {
     public void shouldReplicateSetTaskOverNetwork() throws Exception {
         int port = freePort();
         store = new TestCacheStore();
-        receiver = new ReplicationReceiver("127.0.0.1", port, store);
+        receiver = new ReplicationReceiver("127.0.0.1", port, store, 1024 * 1024, null, null);
         receiver.start();
         awaitRunning(receiver, 2000);
 
         NioEventLoopGroup group = new NioEventLoopGroup(1);
         try {
             Channel ch = connectToReceiver(group, port);
-            ReplicationTask setTask = ReplicationTask.ofSet("key-1", "value-1", "origin-node");
+            ReplicationTask setTask = ReplicationTask.ofSet("key-1", "value-1", "origin-node", 0L);
             ch.writeAndFlush(setTask).sync();
             awaitValue(store, "key-1", "value-1", 1500);
             assertEquals("value-1", store.get("key-1"));
@@ -121,14 +121,14 @@ public class ReplicationReceiverIntegrationTest {
         store = new TestCacheStore();
         store.put("key-to-delete", "initial-value");
         
-        receiver = new ReplicationReceiver("127.0.0.1", port, store);
+        receiver = new ReplicationReceiver("127.0.0.1", port, store, 1024 * 1024, null, null);
         receiver.start();
         awaitRunning(receiver, 2000);
 
         NioEventLoopGroup group = new NioEventLoopGroup(1);
         try {
             Channel ch = connectToReceiver(group, port);
-            ReplicationTask deleteTask = ReplicationTask.ofDelete("key-to-delete", "origin-node");
+            ReplicationTask deleteTask = ReplicationTask.ofDelete("key-to-delete", "origin-node", 0L);
             ch.writeAndFlush(deleteTask).sync();
             awaitDeletion(store, "key-to-delete", 1500);
             assertNull(store.get("key-to-delete"));
@@ -143,16 +143,16 @@ public class ReplicationReceiverIntegrationTest {
     public void shouldProcessMultipleTasksInOrder() throws Exception {
         int port = freePort();
         store = new TestCacheStore();
-        receiver = new ReplicationReceiver("127.0.0.1", port, store);
+        receiver = new ReplicationReceiver("127.0.0.1", port, store, 1024 * 1024, null, null);
         receiver.start();
         awaitRunning(receiver, 2000);
 
         NioEventLoopGroup group = new NioEventLoopGroup(1);
         try {
             Channel ch = connectToReceiver(group, port);
-            ch.writeAndFlush(ReplicationTask.ofSet("k1", "v1", "node-B")).sync();
-            ch.writeAndFlush(ReplicationTask.ofSet("k2", "v2", "node-B")).sync();
-            ch.writeAndFlush(ReplicationTask.ofSet("k3", "v3", "node-B")).sync();
+            ch.writeAndFlush(ReplicationTask.ofSet("k1", "v1", "node-B", 0L)).sync();
+            ch.writeAndFlush(ReplicationTask.ofSet("k2", "v2", "node-B", 0L)).sync();
+            ch.writeAndFlush(ReplicationTask.ofSet("k3", "v3", "node-B", 0L)).sync();
             awaitValue(store, "k3", "v3", 2000);
             assertEquals("v1", store.get("k1"));
             assertEquals("v2", store.get("k2"));
@@ -168,14 +168,14 @@ public class ReplicationReceiverIntegrationTest {
     public void shouldHandleClientDisconnect() throws Exception {
         int port = freePort();
         store = new TestCacheStore();
-        receiver = new ReplicationReceiver("127.0.0.1", port, store);
+        receiver = new ReplicationReceiver("127.0.0.1", port, store, 1024 * 1024, null, null);
         receiver.start();
         awaitRunning(receiver, 2000);
 
         NioEventLoopGroup group = new NioEventLoopGroup(1);
         try {
             Channel ch = connectToReceiver(group, port);
-            ch.writeAndFlush(ReplicationTask.ofSet("key", "value", "node-B")).sync();
+            ch.writeAndFlush(ReplicationTask.ofSet("key", "value", "node-B", 0L)).sync();
             awaitValue(store, "key", "value", 1500);
             ch.close().sync();
             Thread.sleep(100);
@@ -190,12 +190,12 @@ public class ReplicationReceiverIntegrationTest {
     public void shouldStopServerAndReleasePort() throws Exception {
         int port = freePort();
         store = new TestCacheStore();
-        receiver = new ReplicationReceiver("127.0.0.1", port, store);
+        receiver = new ReplicationReceiver("127.0.0.1", port, store, 1024 * 1024, null, null);
         receiver.start();
         awaitRunning(receiver, 2000);
         receiver.stop();
         assertFalse(receiver.isRunning());
-        ReplicationReceiver receiver2 = new ReplicationReceiver("127.0.0.1", port, store);
+        ReplicationReceiver receiver2 = new ReplicationReceiver("127.0.0.1", port, store, 1024 * 1024, null, null);
         receiver2.start();
         awaitRunning(receiver2, 2000);
         assertTrue(receiver2.isRunning());

@@ -23,7 +23,7 @@ public class ReplicationMessageCodecTest {
     @Test
     @DisplayName("Should encode and decode SET task correctly")
     void shouldEncodeAndDecodeSetTask() {
-        ReplicationTask original = ReplicationTask.ofSet("user:1", "Alice", "node-A");
+        ReplicationTask original = ReplicationTask.ofSet("user:1", "Alice", "node-A", 0L);
         EmbeddedChannel channel = new EmbeddedChannel(new ReplicationMessageCodec());
         assertTrue(channel.writeOutbound(original));
         ByteBuf encoded = channel.readOutbound();
@@ -42,7 +42,7 @@ public class ReplicationMessageCodecTest {
     @Test
     @DisplayName("Should encode and decode DELETE task correctly")
     void shouldEncodeAndDecodeDeleteTask() {
-        ReplicationTask original = ReplicationTask.ofDelete("session:42", "node-B");
+        ReplicationTask original = ReplicationTask.ofDelete("session:42", "node-B", 0L);
         EmbeddedChannel channel = new EmbeddedChannel(new ReplicationMessageCodec());
         assertTrue(channel.writeOutbound(original));
         ByteBuf encoded = channel.readOutbound();
@@ -59,7 +59,7 @@ public class ReplicationMessageCodecTest {
     @DisplayName("Should handle null value in SET task")
     void shouldHandleNullValue() {
         ReplicationTask original = new ReplicationTask("key", null,
-                ReplicationTask.Operation.SET, System.currentTimeMillis(), "node-A");
+                ReplicationTask.Operation.SET, System.currentTimeMillis(), "node-A", 0L);
         EmbeddedChannel channel = new EmbeddedChannel(new ReplicationMessageCodec());
         assertTrue(channel.writeOutbound(original));
         ByteBuf encoded = channel.readOutbound();
@@ -75,7 +75,7 @@ public class ReplicationMessageCodecTest {
     @DisplayName("Should handle null origin")
     void shouldHandleNullOrigin() {
         ReplicationTask original = new ReplicationTask("key", "value",
-                ReplicationTask.Operation.SET, System.currentTimeMillis(), null);
+                ReplicationTask.Operation.SET, System.currentTimeMillis(), null, 0L);
         EmbeddedChannel channel = new EmbeddedChannel(new ReplicationMessageCodec());
         assertTrue(channel.writeOutbound(original));
         ByteBuf encoded = channel.readOutbound();
@@ -91,7 +91,7 @@ public class ReplicationMessageCodecTest {
     @DisplayName("Should handle both null value and null origin")
     void shouldHandleNullValueAndOrigin() {
         ReplicationTask original = new ReplicationTask("key", null,
-                ReplicationTask.Operation.DELETE, System.currentTimeMillis(), null);
+                ReplicationTask.Operation.DELETE, System.currentTimeMillis(), null, 0L);
         EmbeddedChannel channel = new EmbeddedChannel(new ReplicationMessageCodec());
         assertTrue(channel.writeOutbound(original));
         ByteBuf encoded = channel.readOutbound();
@@ -110,7 +110,7 @@ public class ReplicationMessageCodecTest {
     void shouldPreserveTimestamp() {
         long customTimestamp = 1234567890123L;
         ReplicationTask original = new ReplicationTask("key", "value",
-                ReplicationTask.Operation.SET, customTimestamp, "node-X");
+                ReplicationTask.Operation.SET, customTimestamp, "node-X", 0L);
         EmbeddedChannel channel = new EmbeddedChannel(new ReplicationMessageCodec());
         assertTrue(channel.writeOutbound(original));
         ByteBuf encoded = channel.readOutbound();
@@ -123,7 +123,7 @@ public class ReplicationMessageCodecTest {
     @Test
     @DisplayName("Should support round-trip consistency")
     void shouldSupportRoundTripConsistency() {
-        ReplicationTask original = ReplicationTask.ofSet("session:42", "payload", "replica-1");
+        ReplicationTask original = ReplicationTask.ofSet("session:42", "payload", "replica-1", 0L);
         EmbeddedChannel channel = new EmbeddedChannel(new ReplicationMessageCodec());
         assertTrue(channel.writeOutbound(original));
         ByteBuf encoded = channel.readOutbound();
@@ -141,7 +141,7 @@ public class ReplicationMessageCodecTest {
     @DisplayName("Should handle empty strings for value and origin")
     void shouldHandleEmptyStrings() {
         ReplicationTask original = new ReplicationTask("key", "",
-                ReplicationTask.Operation.SET, System.currentTimeMillis(), "");
+                ReplicationTask.Operation.SET, System.currentTimeMillis(), "", 0L);
         EmbeddedChannel channel = new EmbeddedChannel(new ReplicationMessageCodec());
         assertTrue(channel.writeOutbound(original));
         ByteBuf encoded = channel.readOutbound();
@@ -156,7 +156,7 @@ public class ReplicationMessageCodecTest {
     @DisplayName("Should handle large values (within limit)")
     void shouldHandleLargeValues() {
         String largeValue = "x".repeat(50_000); // 50KB, under 64KB limit
-        ReplicationTask original = ReplicationTask.ofSet("key", largeValue, "node-A");
+        ReplicationTask original = ReplicationTask.ofSet("key", largeValue, "node-A", 0L);
         EmbeddedChannel channel = new EmbeddedChannel(new ReplicationMessageCodec());
         assertTrue(channel.writeOutbound(original));
         ByteBuf encoded = channel.readOutbound();
@@ -225,9 +225,9 @@ public class ReplicationMessageCodecTest {
     void shouldHandleMultipleTasksInSequence() {
         EmbeddedChannel channel = new EmbeddedChannel(new ReplicationMessageCodec());
 
-        ReplicationTask task1 = ReplicationTask.ofSet("k1", "v1", "node-A");
-        ReplicationTask task2 = ReplicationTask.ofDelete("k2", "node-B");
-        ReplicationTask task3 = ReplicationTask.ofSet("k3", "v3", "node-C");
+        ReplicationTask task1 = ReplicationTask.ofSet("k1", "v1", "node-A", 0L);
+        ReplicationTask task2 = ReplicationTask.ofDelete("k2", "node-B", 0L);
+        ReplicationTask task3 = ReplicationTask.ofSet("k3", "v3", "node-C", 0L);
 
         assertTrue(channel.writeOutbound(task1));
         assertTrue(channel.writeOutbound(task2));
@@ -259,7 +259,7 @@ public class ReplicationMessageCodecTest {
     @Test
     @DisplayName("Should encode DELETE operation with byte 1")
     void shouldEncodeDeleteOperationCorrectly() {
-        ReplicationTask deleteTask = ReplicationTask.ofDelete("key", "node-A");
+        ReplicationTask deleteTask = ReplicationTask.ofDelete("key", "node-A", 0L);
         EmbeddedChannel channel = new EmbeddedChannel(new ReplicationMessageCodec());
 
         assertTrue(channel.writeOutbound(deleteTask));
@@ -274,7 +274,7 @@ public class ReplicationMessageCodecTest {
     @Test
     @DisplayName("Should encode SET operation with byte 0")
     void shouldEncodeSetOperationCorrectly() {
-        ReplicationTask setTask = ReplicationTask.ofSet("key", "value", "node-A");
+        ReplicationTask setTask = ReplicationTask.ofSet("key", "value", "node-A", 0L);
         EmbeddedChannel channel = new EmbeddedChannel(new ReplicationMessageCodec());
 
         assertTrue(channel.writeOutbound(setTask));
@@ -290,7 +290,7 @@ public class ReplicationMessageCodecTest {
     @DisplayName("Should handle special characters in strings")
     void shouldHandleSpecialCharacters() {
         String specialValue = "Hello \n\t\r";
-        ReplicationTask original = ReplicationTask.ofSet("key", specialValue, "node-Ω");
+        ReplicationTask original = ReplicationTask.ofSet("key", specialValue, "node-Ω", 0L);
         EmbeddedChannel channel = new EmbeddedChannel(new ReplicationMessageCodec());
 
         assertTrue(channel.writeOutbound(original));

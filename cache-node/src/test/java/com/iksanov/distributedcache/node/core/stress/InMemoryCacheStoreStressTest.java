@@ -24,7 +24,7 @@ public class InMemoryCacheStoreStressTest {
     void shouldHandleHighConcurrencyAndTTLExpiration() throws Exception {
         int maxSize = 5000;
         long ttlMillis = 200;
-        InMemoryCacheStore store = new InMemoryCacheStore(maxSize, ttlMillis, 100, metrics);
+        InMemoryCacheStore store = new InMemoryCacheStore(maxSize, ttlMillis, metrics);
 
         int threads = 16;
         int operationsPerThread = 20000;
@@ -88,7 +88,7 @@ public class InMemoryCacheStoreStressTest {
     @DisplayName("Should enforce reasonable size bounds under extreme load")
     void shouldEnforceSizeBoundsUnderExtremeLoad() throws InterruptedException {
         int maxSize = 1000;
-        InMemoryCacheStore store = new InMemoryCacheStore(maxSize, 0, 10000, metrics);
+        InMemoryCacheStore store = new InMemoryCacheStore(maxSize, 0, metrics);
         int threads = 20;
         int operations = 50000;
         ExecutorService executor = Executors.newFixedThreadPool(threads);
@@ -128,7 +128,7 @@ public class InMemoryCacheStoreStressTest {
     @Test
     @DisplayName("Should handle mixed workload with deletions")
     void shouldHandleMixedWorkloadWithDeletions() throws InterruptedException {
-        InMemoryCacheStore store = new InMemoryCacheStore(1000, 10000, 500, metrics);
+        InMemoryCacheStore store = new InMemoryCacheStore(1000, 10000, metrics);
         for (int i = 0; i < 1000; i++) {
             store.put("initial-" + i, "value-" + i);
         }
@@ -187,7 +187,7 @@ public class InMemoryCacheStoreStressTest {
     @DisplayName("Should evict entries when cache is full")
     void shouldEvictEntriesWhenFull() {
         int maxSize = 50;
-        InMemoryCacheStore store = new InMemoryCacheStore(maxSize, 0, 10000, metrics);
+        InMemoryCacheStore store = new InMemoryCacheStore(maxSize, 0, metrics);
         for (int i = 0; i < 150; i++) {
             store.put("key-" + i, "value-" + i);
         }
@@ -200,7 +200,7 @@ public class InMemoryCacheStoreStressTest {
     @DisplayName("Performance benchmark - measure operation latencies")
     void performanceBenchmark() {
         int maxSize = 10000;
-        InMemoryCacheStore store = new InMemoryCacheStore(maxSize, 0, 10000, metrics);
+        InMemoryCacheStore store = new InMemoryCacheStore(maxSize, 0, metrics);
 
         for (int i = 0; i < maxSize; i++) {
             store.put("warmup-" + i, "value-" + i);

@@ -46,18 +46,6 @@ public class ReplicationManager {
     private final int instanceId;
     private final AtomicLong sequenceGenerator = new AtomicLong(0);
 
-    /**
-     * Creates a new ReplicationManager instance.
-     * <p>
-     * Simplified for master-replica architecture where sharding is handled by proxy.
-     * Master always replicates all data to its replicas without checking key ownership.
-     *
-     * @param currentNode Information about the current node
-     * @param sender      Component responsible for sending replication tasks
-     * @param receiver    Component responsible for receiving and applying replication tasks
-     * @param metrics     Optional metrics collector for replication statistics
-     * @throws NullPointerException if currentNode, sender, or receiver is null
-     */
     public ReplicationManager(NodeInfo currentNode, ReplicationSender sender, ReplicationReceiver receiver, ReplicationMetrics metrics) {
         this.currentNode = Objects.requireNonNull(currentNode, "currentNode cannot be null");
         this.sender = Objects.requireNonNull(sender, "sender cannot be null");
@@ -81,13 +69,6 @@ public class ReplicationManager {
         return Executors.newSingleThreadExecutor(factory);
     }
 
-    /**
-     * Called when a SET operation is performed locally on this node.
-     * Master always replicates to its replicas (sharding is handled by proxy).
-     *
-     * @param key   the cache key
-     * @param value the value to set
-     */
     public void onLocalSet(String key, String value) {
         Objects.requireNonNull(key, "key cannot be null");
         Objects.requireNonNull(value, "value cannot be null");
@@ -98,12 +79,6 @@ public class ReplicationManager {
         submitReplicationTask(task, "SET");
     }
 
-    /**
-     * Called when a DELETE operation is performed locally on this node.
-     * Master always replicates to its replicas (sharding is handled by proxy).
-     *
-     * @param key the cache key to delete
-     */
     public void onLocalDelete(String key) {
         Objects.requireNonNull(key, "key cannot be null");
 

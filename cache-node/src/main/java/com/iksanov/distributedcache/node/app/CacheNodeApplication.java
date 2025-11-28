@@ -63,8 +63,8 @@ public class CacheNodeApplication {
             replicationMetrics = new ReplicationMetrics();
             log.info("[OK] Metrics initialized");
 
-            cache = new InMemoryCacheStore(config.cacheMaxSize(), config.cacheTtlMillis(), 5000, cacheMetrics);
-            log.info("[OK] Cache initialized (size={})", config.cacheMaxSize());
+            cache = new InMemoryCacheStore(config.cacheMaxSize(), config.cacheTtlMillis(), cacheMetrics);
+            log.info("[OK] Cache initialized (maxSize={}, TTL={}ms)", config.cacheMaxSize(), config.cacheTtlMillis());
 
             metricsServer = new MetricsServer(config.metricsPort(), cacheMetrics, netMetrics, replicationMetrics);
             metricsServer.start();
@@ -140,7 +140,7 @@ public class CacheNodeApplication {
 
         replicationReceiver.start();
         log.info("[OK] ReplicationReceiver started on port {}", config.replicationPort());
-        replicationSender = new ReplicationSender(replicaManager, null, replicationMetrics);
+        replicationSender = new ReplicationSender(replicaManager, replicationMetrics);
         log.info("[OK] ReplicationSender initialized");
 
         failoverManager = new FailoverManager(

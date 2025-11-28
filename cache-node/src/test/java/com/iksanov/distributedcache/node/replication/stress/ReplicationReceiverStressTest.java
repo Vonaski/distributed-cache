@@ -25,8 +25,8 @@ public class ReplicationReceiverStressTest {
     @Test
     @DisplayName("Should handle high concurrent load with consistency")
     void shouldHandleHighConcurrentLoadWithConsistency() throws Exception {
-        InMemoryCacheStore store = new InMemoryCacheStore(10_000, 60_000, 10_000);
-        ReplicationReceiver receiver = new ReplicationReceiver("127.0.0.1", 0, store);
+        InMemoryCacheStore store = new InMemoryCacheStore(10_000, 60_000);
+        ReplicationReceiver receiver = new ReplicationReceiver("127.0.0.1", 0, store, 1024 * 1024, null, null);
 
         final int threads = 8;
         final int operationsPerThread = 12_500;
@@ -49,11 +49,7 @@ public class ReplicationReceiverStressTest {
                         String key = "key-" + (i % 100);
                         String value = "v-" + threadId + "-" + i;
                         try {
-                            ReplicationTask task = ReplicationTask.ofSet(
-                                    key,
-                                    value,
-                                    "node-B"
-                            );
+                            ReplicationTask task = ReplicationTask.ofSet(key, value, "node-B", 0L);
                             receiver.applyTask(task);
                             successCounter.incrementAndGet();
                         } catch (Exception e) {
@@ -102,8 +98,8 @@ public class ReplicationReceiverStressTest {
     @Test
     @DisplayName("Should handle mixed SET and DELETE operations under load")
     void shouldHandleMixedOperationsUnderLoad() throws Exception {
-        InMemoryCacheStore store = new InMemoryCacheStore(5_000, 60_000, 10_000);
-        ReplicationReceiver receiver = new ReplicationReceiver("127.0.0.1", 0, store);
+        InMemoryCacheStore store = new InMemoryCacheStore(5_000, 60_000);
+        ReplicationReceiver receiver = new ReplicationReceiver("127.0.0.1", 0, store, 1024 * 1024, null, null);
 
         final int threads = 6;
         final int operationsPerThread = 5_000;
@@ -121,14 +117,10 @@ public class ReplicationReceiverStressTest {
                         String key = "key-" + (i % 500);
                         ReplicationTask task;
                         if (i % 4 == 0) {
-                            task = ReplicationTask.ofDelete(key, "node-" + threadId);
+                            task = ReplicationTask.ofDelete(key, "node-" + threadId, 0L);
                             deleteOperations.incrementAndGet();
                         } else {
-                            task = ReplicationTask.ofSet(
-                                    key,
-                                    "value-" + threadId + "-" + i,
-                                    "node-" + threadId
-                            );
+                            task = ReplicationTask.ofSet(key, "value-" + threadId + "-" + i, "node-" + threadId, 0L);
                             setOperations.incrementAndGet();
                         }
                         receiver.applyTask(task);
@@ -151,8 +143,8 @@ public class ReplicationReceiverStressTest {
     @Test
     @DisplayName("Should handle rapid sequential operations")
     void shouldHandleRapidSequentialOperations() {
-        InMemoryCacheStore store = new InMemoryCacheStore(10_000, 60_000, 10_000);
-        ReplicationReceiver receiver = new ReplicationReceiver("127.0.0.1", 0, store);
+        InMemoryCacheStore store = new InMemoryCacheStore(10_000, 60_000);
+        ReplicationReceiver receiver = new ReplicationReceiver("127.0.0.1", 0, store, 1024 * 1024, null, null);
 
         int operationCount = 50_000;
         long startTime = System.nanoTime();
@@ -160,7 +152,7 @@ public class ReplicationReceiverStressTest {
         for (int i = 0; i < operationCount; i++) {
             String key = "seq-key-" + (i % 1000);
             String value = "value-" + i;
-            ReplicationTask task = ReplicationTask.ofSet(key, value, "origin");
+            ReplicationTask task = ReplicationTask.ofSet(key, value, "origin", 0L);
             receiver.applyTask(task);
         }
 
@@ -177,16 +169,16 @@ public class ReplicationReceiverStressTest {
     @Test
     @DisplayName("Should handle null task gracefully")
     void shouldHandleNullTaskGracefully() {
-        InMemoryCacheStore store = new InMemoryCacheStore(100, 0, 500);
-        ReplicationReceiver receiver = new ReplicationReceiver("127.0.0.1", 0, store);
+        InMemoryCacheStore store = new InMemoryCacheStore(100, 0);
+        ReplicationReceiver receiver = new ReplicationReceiver("127.0.0.1", 0, store, 1024 * 1024, null, null);
         assertDoesNotThrow(() -> receiver.applyTask(null));
     }
 
     @Test
     @DisplayName("Should maintain consistency with concurrent updates to same key")
     void shouldMaintainConsistencyWithConcurrentUpdates() throws Exception {
-        InMemoryCacheStore store = new InMemoryCacheStore(100, 0, 500);
-        ReplicationReceiver receiver = new ReplicationReceiver("127.0.0.1", 0, store);
+        InMemoryCacheStore store = new InMemoryCacheStore(100, 0);
+        ReplicationReceiver receiver = new ReplicationReceiver("127.0.0.1", 0, store, 1024 * 1024, null, null);
         String key = "concurrent-key";
         int threads = 10;
         int operationsPerThread = 100;
@@ -198,11 +190,7 @@ public class ReplicationReceiverStressTest {
                 try {
                     for (int i = 0; i < operationsPerThread; i++) {
                         String value = "thread-" + threadId + "-op-" + i;
-                        ReplicationTask task = ReplicationTask.ofSet(
-                                key,
-                                value,
-                                "node-" + threadId
-                        );
+                        ReplicationTask task = ReplicationTask.ofSet(key, value, "node-" + threadId, 0L);
                         receiver.applyTask(task);
                     }
                 } finally {

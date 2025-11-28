@@ -30,8 +30,8 @@ public class CacheClusterConfig {
     @Setter
     public static class ConnectionConfig {
         private int timeoutMillis = 3000;
-        private int maxRetries = 2;
-        private int poolSize = 10;
+        private int maxRetries = 3;
+        private int poolSize = 2;
     }
 }
 

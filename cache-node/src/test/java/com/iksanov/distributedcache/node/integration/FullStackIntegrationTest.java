@@ -88,28 +88,17 @@ class FullStackIntegrationTest {
         replicaManager.registerReplica(masterNode, replicaNode1);
         replicaManager.registerReplica(masterNode, replicaNode2);
 
-        NioEventLoopGroup sharedReplicationGroup = new NioEventLoopGroup(4);
-
         for (NodeInfo node : allNodes) {
             System.out.println("Starting node: " + node.nodeId());
 
-            CacheStore store = new InMemoryCacheStore(10000, 0, 1000, cacheMetrics);
+            CacheStore store = new InMemoryCacheStore(10000, 1000, cacheMetrics);
             stores.put(node.nodeId(), store);
 
-            ReplicationReceiver receiver = new ReplicationReceiver(
-                    node.host(),
-                    node.replicationPort(),
-                    store,
-                    1024 * 1024,
-                    node.nodeId()
-            );
+            ReplicationReceiver receiver = new ReplicationReceiver(node.host(), node.replicationPort(), store, 1024 * 1024, node.nodeId(), null);
             receiver.start();
             receivers.put(node.nodeId(), receiver);
 
-            ReplicationSender sender = new ReplicationSender(
-                    replicaManager,
-                    sharedReplicationGroup
-            );
+            ReplicationSender sender = new ReplicationSender(replicaManager, null);
             senders.put(node.nodeId(), sender);
 
             ReplicationManager replManager = new ReplicationManager(
